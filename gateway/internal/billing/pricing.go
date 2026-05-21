@@ -83,38 +83,41 @@ func (pe *PricingEngine) GetPrice(ctx context.Context, model string) *ModelPrice
 	pe.mu.RUnlock()
 
 	// Check Redis cache
-	data, err := pe.rdb.Get(ctx, pricingRedisKey).Bytes()
-	if err == nil {
-		var cache map[string]*ModelPrice
-		if json.Unmarshal(data, &cache) == nil {
-			if p, ok := cache[model]; ok {
-				pe.mu.Lock()
-				pe.cache[model] = p
-				pe.mu.Unlock()
-				return p
+	if pe.rdb != nil {
+		data, err := pe.rdb.Get(ctx, pricingRedisKey).Bytes()
+		if err == nil {
+			var cache map[string]*ModelPrice
+			if json.Unmarshal(data, &cache) == nil {
+				if p, ok := cache[model]; ok {
+					pe.mu.Lock()
+					pe.cache[model] = p
+					pe.mu.Unlock()
+					return p
+				}
 			}
 		}
 	}
 
 	// Fallback to DB
-	p := &ModelPrice{}
-	err = pe.pg.QueryRow(ctx,
-		`SELECT model_name, sell_input_price, sell_output_price,
-		        vip_discount, enterprise_discount
-		 FROM model_pricing WHERE model_name = $1 AND is_active = true`,
-		model,
-	).Scan(&p.ModelName, &p.SellInputPrice, &p.SellOutputPrice,
-		&p.VIPDiscount, &p.EnterpriseDiscount)
+	if pe.pg != nil {
+		p := &ModelPrice{}
+		err := pe.pg.QueryRow(ctx,
+			`SELECT model_name, sell_input_price, sell_output_price,
+			        vip_discount, enterprise_discount
+			 FROM model_pricing WHERE model_name = $1 AND is_active = true`,
+			model,
+		).Scan(&p.ModelName, &p.SellInputPrice, &p.SellOutputPrice,
+			&p.VIPDiscount, &p.EnterpriseDiscount)
 
-	if err != nil {
-		return nil
+		if err == nil {
+			pe.mu.Lock()
+			pe.cache[model] = p
+			pe.mu.Unlock()
+			return p
+		}
 	}
 
-	pe.mu.Lock()
-	pe.cache[model] = p
-	pe.mu.Unlock()
-
-	return p
+	return nil
 }
 
 // CalculateCost computes the cost in cents for a given token usage.

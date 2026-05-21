@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { motion } from "framer-motion"
-import { ArrowRight, Code2, Mail, Lock, User, Loader2, Eye, EyeOff } from "lucide-react"
+import { ArrowRight, Mail, Lock, User, Loader2, Eye, EyeOff } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
@@ -16,29 +16,27 @@ export default function LoginPage() {
   const [tab, setTab] = useState<"login" | "register">("login")
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 bg-surface-950">
-      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[600px] h-[400px] rounded-full bg-brand-600/10 blur-[120px] pointer-events-none" />
+    <div className="min-h-screen flex items-center justify-center px-4 bg-surface-50">
       <div className="absolute top-4 right-4"><LangSwitcher /></div>
 
-      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5 }} className="relative w-full max-w-md">
+      <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.4 }} className="relative w-full max-w-md">
         <Link href="/" className="flex items-center justify-center gap-2.5 mb-10">
-          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center shadow-lg shadow-brand-500/30">
-            <Code2 className="w-5 h-5 text-white" />
+          <div className="w-9 h-9 rounded-lg bg-surface-950 flex items-center justify-center">
+            <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z"/></svg>
           </div>
           <span className="text-xl font-bold">Camellia</span>
         </Link>
 
-        <div className="glass p-8">
-          {/* Tabs */}
-          <div className="flex mb-6 bg-surface-800 rounded-lg p-1">
-            <button onClick={() => setTab("login")} className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${tab === "login" ? "bg-brand-600 text-white" : "text-gray-400 hover:text-gray-200"}`}>{t("login.tabLogin")}</button>
-            <button onClick={() => setTab("register")} className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${tab === "register" ? "bg-brand-600 text-white" : "text-gray-400 hover:text-gray-200"}`}>{t("login.tabRegister")}</button>
+        <div className="bg-white border border-surface-200 rounded-[20px] p-8 shadow-sm">
+          <div className="flex mb-6 bg-surface-100 rounded-lg p-1">
+            <button onClick={() => setTab("login")} className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${tab === "login" ? "bg-surface-950 text-white" : "text-surface-600 hover:text-surface-900"}`}>{t("login.tabLogin")}</button>
+            <button onClick={() => setTab("register")} className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${tab === "register" ? "bg-surface-950 text-white" : "text-surface-600 hover:text-surface-900"}`}>{t("login.tabRegister")}</button>
           </div>
 
           {tab === "login" ? <LoginForm t={t} router={router} /> : <RegisterForm t={t} router={router} setTab={setTab} />}
         </div>
 
-        <Link href="/" className="block text-center text-xs text-gray-500 hover:text-gray-300 mt-4 transition-colors">{t("common.back")}</Link>
+        <Link href="/" className="block text-center text-sm text-surface-500 hover:text-surface-700 mt-4 transition-colors">{t("common.back")}</Link>
       </motion.div>
     </div>
   )
@@ -56,7 +54,7 @@ function LoginForm({ t, router }: { t: any; router: any }) {
     setLoading(true)
     try {
       const { user } = await api.login(login, password)
-      toast.success(t("login.toast.welcome") + (user?.nickname ? `, ${user.nickname}` : "!"))
+      toast.success(t("login.toast.welcome") + (user?.nickname ? t("login.toast.welcomeName", { name: user.nickname }) : t("login.toast.welcomeDefault")))
       router.push(user?.role === "admin" ? "/admin" : "/dashboard")
       router.refresh()
     } catch (err: any) {
@@ -67,18 +65,18 @@ function LoginForm({ t, router }: { t: any; router: any }) {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <label className="text-sm font-medium text-gray-300 mb-1.5 block">{t("login.emailLabel")} / {t("login.usernameLabel")}</label>
+        <label className="text-sm font-medium text-surface-800 mb-1.5 block">{t("login.emailLabel")} / {t("login.usernameLabel")}</label>
         <div className="relative">
-          <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+          <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
           <input type="text" value={login} onChange={(e) => setLogin(e.target.value)} placeholder="email@example.com" className="input-field pl-10" required autoFocus autoComplete="username" />
         </div>
       </div>
       <div>
-        <label className="text-sm font-medium text-gray-300 mb-1.5 block">{t("login.passwordLabel")}</label>
+        <label className="text-sm font-medium text-surface-800 mb-1.5 block">{t("login.passwordLabel")}</label>
         <div className="relative">
-          <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+          <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
           <input type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("login.passwordPlaceholder")} className="input-field pl-10 pr-10" required autoComplete="current-password" />
-          <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300">
+          <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-700">
             {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
         </div>
@@ -132,43 +130,42 @@ function RegisterForm({ t, router, setTab }: { t: any; router: any; setTab: (v: 
   return (
     <form onSubmit={needVerify ? handleVerify : handleSendCode} className="space-y-4">
       <div>
-        <label className="text-sm font-medium text-gray-300 mb-1.5 block">{t("login.emailLabel")}</label>
+        <label className="text-sm font-medium text-surface-800 mb-1.5 block">{t("login.emailLabel")}</label>
         <div className="relative">
-          <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+          <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" className="input-field pl-10" required autoComplete="email" disabled={needVerify} />
         </div>
       </div>
       <div>
-        <label className="text-sm font-medium text-gray-300 mb-1.5 block">{t("login.usernameLabel")}</label>
+        <label className="text-sm font-medium text-surface-800 mb-1.5 block">{t("login.usernameLabel")}</label>
         <div className="relative">
-          <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+          <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
           <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t("login.usernamePlaceholder")} className="input-field pl-10" required autoComplete="username" disabled={needVerify} />
         </div>
       </div>
       <div>
-        <label className="text-sm font-medium text-gray-300 mb-1.5 block">{t("login.passwordLabel")}</label>
+        <label className="text-sm font-medium text-surface-800 mb-1.5 block">{t("login.passwordLabel")}</label>
         <div className="relative">
-          <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+          <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
           <input type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("login.passwordPlaceholder")} className="input-field pl-10 pr-10" required autoComplete="new-password" disabled={needVerify} />
-          <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300">
+          <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-700">
             {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
         </div>
       </div>
       <div>
-        <label className="text-sm font-medium text-gray-300 mb-1.5 block">{t("login.confirmPasswordLabel")}</label>
+        <label className="text-sm font-medium text-surface-800 mb-1.5 block">{t("login.confirmPasswordLabel")}</label>
         <div className="relative">
-          <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+          <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
           <input type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} placeholder={t("login.passwordPlaceholder")} className="input-field pl-10" required autoComplete="new-password" disabled={needVerify} />
         </div>
       </div>
 
-      {/* Verification code step */}
       {needVerify && (
         <div>
-          <label className="text-sm font-medium text-gray-300 mb-1.5 block">{t("login.codeLabel")}</label>
+          <label className="text-sm font-medium text-surface-800 mb-1.5 block">{t("login.codeLabel")}</label>
           <input type="text" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} placeholder={t("login.codePlaceholder")} className="input-field text-center text-2xl tracking-[0.5em] font-mono" required autoFocus autoComplete="one-time-code" />
-          <p className="text-xs text-gray-500 mt-1">{t("login.codeSent", { email })}</p>
+          <p className="text-xs text-surface-500 mt-1">{t("login.codeSent", { email })}</p>
         </div>
       )}
 
@@ -177,14 +174,14 @@ function RegisterForm({ t, router, setTab }: { t: any; router: any; setTab: (v: 
       </button>
 
       {needVerify && (
-        <button type="button" onClick={() => { setNeedVerify(false); setCode("") }} className="w-full text-sm text-gray-500 hover:text-gray-300 transition-colors py-2">
+        <button type="button" onClick={() => { setNeedVerify(false); setCode("") }} className="w-full text-sm text-surface-500 hover:text-surface-700 transition-colors py-2">
           {t("login.differentEmail")}
         </button>
       )}
 
-      <p className="text-center text-xs text-gray-500">
+      <p className="text-center text-xs text-surface-500">
         {t("login.terms")} {" "}
-        <button type="button" onClick={() => setTab("login")} className="text-brand-400 hover:underline">{t("login.tabLogin")}</button>
+        <button type="button" onClick={() => setTab("login")} className="text-surface-900 underline font-medium">{t("login.tabLogin")}</button>
       </p>
     </form>
   )

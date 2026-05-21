@@ -129,7 +129,7 @@ const translations: Record<Lang, Record<string, string>> = {
     "login.toast.codeSent": "验证码已发送到你的邮箱",
     "login.toast.sendFailed": "验证码发送失败",
     "login.toast.invalidCode": "请输入 6 位验证码",
-    "login.toast.welcome": "欢迎回来{fragment}",
+    "login.toast.welcome": "欢迎回来",
     "login.toast.welcomeName": "，{name}",
     "login.toast.welcomeDefault": "！",
     "login.toast.invalidCodeError": "验证码错误",
@@ -442,7 +442,7 @@ const translations: Record<Lang, Record<string, string>> = {
     "login.toast.sendFailed": "Failed to send code",
     "login.toast.invalidCode": "Please enter a 6-digit code",
     "login.toast.welcome": "Welcome",
-    "login.toast.welcomeName": "Welcome, {name}",
+    "login.toast.welcomeName": ", {name}",
     "login.toast.welcomeDefault": "!",
     "login.toast.invalidCodeError": "Invalid code",
     "login.passwordLabel": "Password",
@@ -650,15 +650,24 @@ const I18nContext = createContext<I18nContextType>({
 })
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [lang, setLangState] = useState<Lang>("zh")
+  const [lang, setLangState] = useState<Lang>(() => {
+    // Always default to Chinese on first render
+    // Only load from localStorage if user explicitly chose "en" before
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("camellia_lang")
+      if (stored === "en") return "en"
+    }
+    return "zh"
+  })
 
+  // Sync with localStorage on mount (one-time after hydration)
   useEffect(() => {
-    const stored = localStorage.getItem("camellia_lang") as Lang | null
-    if (stored === "en" || stored === "zh") {
-      setLangState(stored)
+    const stored = localStorage.getItem("camellia_lang")
+    if (stored === "en") {
+      setLangState("en")
     } else {
-      // Default to Chinese
-      setLangState("zh")
+      // Force Chinese for everything else (including null, invalid values, "zh")
+      localStorage.setItem("camellia_lang", "zh")
     }
   }, [])
 

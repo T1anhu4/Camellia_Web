@@ -1,12 +1,7 @@
 import { cn } from "@/lib/utils"
 
 export function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={cn("animate-pulse rounded-xl bg-surface-700/50", className)}
-      {...props}
-    />
-  )
+  return <div className={cn("animate-pulse rounded-xl bg-surface-100", className)} {...props} />
 }
 
 export function TableSkeleton({ rows = 5, cols = 4 }: { rows?: number; cols?: number }) {
@@ -25,7 +20,7 @@ export function TableSkeleton({ rows = 5, cols = 4 }: { rows?: number; cols?: nu
 
 export function CardSkeleton() {
   return (
-    <div className="glass p-6 space-y-4">
+    <div className="card bg-surface-50 p-6 space-y-4">
       <Skeleton className="h-4 w-24" />
       <Skeleton className="h-8 w-32" />
       <Skeleton className="h-3 w-16" />

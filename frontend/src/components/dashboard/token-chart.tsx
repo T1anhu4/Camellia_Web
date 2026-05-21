@@ -35,27 +35,12 @@ export function TokenChart({ data }: TokenChartProps) {
             <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
           </linearGradient>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-        <XAxis
-          dataKey="date"
-          tick={{ fontSize: 11, fill: "#64748b" }}
-          axisLine={false}
-          tickLine={false}
-        />
-        <YAxis
-          tick={{ fontSize: 11, fill: "#64748b" }}
-          axisLine={false}
-          tickLine={false}
-          tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}K` : String(v)}
-        />
+        <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+        <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#999" }} axisLine={false} tickLine={false} />
+        <YAxis tick={{ fontSize: 11, fill: "#999" }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}K` : String(v)} />
         <Tooltip
-          contentStyle={{
-            background: "rgb(30, 41, 59)",
-            border: "1px solid rgb(51, 65, 85)",
-            borderRadius: 12,
-            fontSize: 13,
-          }}
-          labelStyle={{ color: "#94a3b8" }}
+          contentStyle={{ background: "#fff", border: "1px solid #e6e6e6", borderRadius: 12, fontSize: 13, boxShadow: "0 4px 16px rgba(0,0,0,0.08)" }}
+          labelStyle={{ color: "#666" }}
           formatter={(value: number) => [value.toLocaleString(), t("dashboard.chart.tooltipTokens")]}
         />
         <Area

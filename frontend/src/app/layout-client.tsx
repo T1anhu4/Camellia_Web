@@ -7,16 +7,18 @@ import "./globals.css"
 function LayoutContent({ children }: { children: React.ReactNode }) {
   const { lang } = useI18n()
   return (
-    <html lang={lang} className="dark">
-      <body className="min-h-screen">
+    <html lang={lang}>
+      <body className="min-h-screen bg-surface-50 text-surface-950 antialiased">
         {children}
         <Toaster
           position="top-center"
           toastOptions={{
             style: {
-              background: "rgb(30, 41, 59)",
-              color: "rgb(226, 232, 240)",
-              border: "1px solid rgb(51, 65, 85)",
+              background: "rgb(255, 255, 255)",
+              color: "rgb(51, 51, 51)",
+              border: "1px solid rgb(230, 230, 230)",
+              boxShadow: "0 4px 24px rgba(0,0,0,0.08)",
+              borderRadius: "12px",
             },
           }}
         />

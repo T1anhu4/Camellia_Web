@@ -8,26 +8,12 @@ export const redis =
     password: process.env.REDIS_PASSWORD || undefined,
     maxRetriesPerRequest: 3,
     retryStrategy(times) {
-      if (times > 3) return null // stop retrying
+      if (times > 3) return null
       return Math.min(times * 200, 2000)
     },
-    lazyConnect: true,
+    lazyConnect: false,
   })
 
 if (process.env.NODE_ENV !== "production") {
   globalForRedis.redis = redis
-}
-
-// Ensure connected (call once at startup)
-let connected = false
-export async function ensureRedisConnection() {
-  if (!connected) {
-    try {
-      await redis.connect()
-      connected = true
-    } catch {
-      // Redis is optional for frontend — allow graceful degradation
-      console.warn("Redis connection failed, caching disabled")
-    }
-  }
 }
