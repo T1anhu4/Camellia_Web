@@ -1,0 +1,38 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Build
+.next
+out
+dist
+
+# Testing
+coverage
+.nyc_output
+
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Docs
+*.md
+README*
+
+# CI
+.github
+
+# OS
+.DS_Store
+Thumbs.db

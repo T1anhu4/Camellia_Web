@@ -1,0 +1,27 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Build artifacts
+gateway
+gateway.exe
+*.test
+*.out
+
+# Environment
+.env
+.env.*
+
+# Docs
+*.md
+docs/
+
+# CI
+.github

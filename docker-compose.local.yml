@@ -1,0 +1,141 @@
+version: "3.9"
+
+# ============================================================
+# LLM Gateway — Local Testing (no Caddy/SSL)
+#
+# Start everything:
+#   docker compose -f docker-compose.local.yml up -d --build
+#
+# Access:
+#   Frontend:      http://localhost:3000
+#   Gateway API:   http://localhost:8080
+#   Mailpit (email): http://localhost:8025
+#   Prometheus:    http://localhost:8080/metrics
+# ============================================================
+
+services:
+  # ============================================================
+  # PostgreSQL — Primary Database
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=llmgateway
+      - POSTGRES_PASSWORD=devpassword
+      - POSTGRES_DB=llmgateway
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_local:/var/lib/postgresql/data
+      - ./gateway/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U llmgateway -d llmgateway"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # ============================================================
+  # Redis — Cache & Rate Limiting
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata_local:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ============================================================
+  # Mailpit — Local email testing (catches all SMTP mail)
+  # ============================================================
+  mailpit:
+    image: axllent/mailpit
+    restart: unless-stopped
+    ports:
+      - "8025:8025"   # Web UI: http://localhost:8025
+      - "1025:1025"   # SMTP receiver
+
+  # ============================================================
+  # Go Gateway — LLM API Proxy (Core)
+  # ============================================================
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    image: llmgw-gateway:local
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - LISTEN_ADDR=:8080
+      - DATABASE_URL=postgres://llmgateway:devpassword@postgres:5432/llmgateway?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=
+      - JWT_SECRET=dev-secret-change-in-production
+      - ENCRYPTION_KEY=0123456789abcdef0123456789abcdef
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ============================================================
+  # Frontend — Next.js App
+  # ============================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:3000
+        - NEXT_PUBLIC_APP_URL=http://localhost:3000
+    image: llmgw-frontend:local
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgres://llmgateway:devpassword@postgres:5432/llmgateway?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=
+      - JWT_SECRET=dev-secret-change-in-production
+      - NODE_ENV=development
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - EMAIL_FROM=${EMAIL_FROM:-Camellia <noreply@camellia.ai>}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-false}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - STRIPE_SECRET_KEY=
+      - STRIPE_WEBHOOK_SECRET=
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gateway:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  pgdata_local:
+  redisdata_local:

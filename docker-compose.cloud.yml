@@ -1,0 +1,74 @@
+# ============================================================
+# Camellia — 云服务器部署（配合 Nginx 反向代理）
+# ============================================================
+
+services:
+  frontend:
+    image: crpi-wh50rfv5mqmjohuv.cn-shenzhen.personal.cr.aliyuncs.com/camellia_ai_web/camellia_web:frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - DATABASE_URL=postgres://camellia:${DB_PASSWORD}@postgres:5432/camellia?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      - JWT_SECRET=${JWT_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - EMAIL_FROM=${EMAIL_FROM}
+      - NODE_ENV=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  gateway:
+    image: crpi-wh50rfv5mqmjohuv.cn-shenzhen.personal.cr.aliyuncs.com/camellia_ai_web/camellia_web:gateway
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - LISTEN_ADDR=:8080
+      - DATABASE_URL=postgres://camellia:${DB_PASSWORD}@postgres:5432/camellia?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      - JWT_SECRET=${JWT_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      - POSTGRES_USER=camellia
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=camellia
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U camellia -d camellia"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  redisdata:

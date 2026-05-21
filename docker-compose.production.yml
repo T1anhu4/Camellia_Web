@@ -1,0 +1,260 @@
+version: "3.9"
+
+# ============================================================
+# LLM Gateway — Production Docker Compose
+# ============================================================
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+    compress: "true"
+
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 15s
+  timeout: 5s
+  retries: 3
+  start_period: 15s
+
+x-deploy: &deploy-defaults
+  restart_policy:
+    condition: on-failure
+    delay: 5s
+    max_attempts: 3
+    window: 120s
+
+services:
+  # ============================================================
+  # Caddy — Reverse Proxy + Auto HTTPS (Let's Encrypt)
+  # ============================================================
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "2019:2019"   # Caddy admin API (optional)
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - API_DOMAIN=${API_DOMAIN:-api.localhost}
+    volumes:
+      - ./config/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - frontend
+      - gateway-net
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # ============================================================
+  # Go Gateway — LLM API Proxy (Core)
+  # ============================================================
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+      args:
+        - VERSION=${VERSION:-latest}
+    image: ${DOCKER_REPO:-llmgw}/gateway:${VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      - LISTEN_ADDR=:8080
+      - DATABASE_URL=postgres://${DB_USER:-llmgateway}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-llmgateway}?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - JWT_SECRET=${JWT_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    expose:
+      - "8080"
+    networks:
+      - gateway-net
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging: *default-logging
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+    deploy:
+      <<: *deploy-defaults
+      replicas: ${GATEWAY_REPLICAS:-2}
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 128M
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+
+  # ============================================================
+  # Frontend — Next.js App
+  # ============================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-https://api.yourdomain.com}
+        - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-https://yourdomain.com}
+    image: ${DOCKER_REPO:-llmgw}/frontend:${VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgres://${DB_USER:-llmgateway}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-llmgateway}?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - JWT_SECRET=${JWT_SECRET}
+      - NODE_ENV=production
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+    expose:
+      - "3000"
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging: *default-logging
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/"]
+      start_period: 20s
+    deploy:
+      <<: *deploy-defaults
+      replicas: ${FRONTEND_REPLICAS:-2}
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # ============================================================
+  # PostgreSQL — Primary Database
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${DB_USER:-llmgateway}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME:-llmgateway}
+      - POSTGRES_INITDB_ARGS=--data-checksums
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./gateway/migrations:/docker-entrypoint-initdb.d:ro
+    expose:
+      - "5432"
+    networks:
+      - backend
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-llmgateway} -d ${DB_NAME:-llmgateway}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    # Production tuning
+    command: >
+      -c shared_buffers=256MB
+      -c effective_cache_size=768MB
+      -c maintenance_work_mem=64MB
+      -c wal_buffers=16MB
+      -c max_connections=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+
+  # ============================================================
+  # Redis — Cache & Rate Limiting
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --tcp-backlog 511
+      --tcp-keepalive 300
+      --timeout 0
+      ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+    volumes:
+      - redisdata:/data
+    expose:
+      - "6379"
+    networks:
+      - backend
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    sysctls:
+      - net.core.somaxconn=1024
+
+# ============================================================
+# Networks
+# ============================================================
+networks:
+  frontend:      # Caddy ↔ Frontend
+    driver: bridge
+  gateway-net:   # Caddy ↔ Gateway
+    driver: bridge
+  backend:       # Gateway/Frontend ↔ Postgres/Redis
+    driver: bridge
+    internal: true  # No external access to databases
+
+# ============================================================
+# Volumes
+# ============================================================
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local

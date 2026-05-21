@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.pnp*
+
+# Build outputs
+.next/
+out/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go
+gateway/gateway
+*.test
+*.out
+vendor/
+
+# Environment
+.env
+.env.local
+.env.production
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+
+# Docker
+docker-compose.override.yml
+
+# Claude
+.claude/
+
+# Temporary
+tmp/
+temp/

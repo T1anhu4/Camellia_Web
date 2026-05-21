@@ -1,0 +1,117 @@
+# ============================================================
+# Caddy — Auto HTTPS + Reverse Proxy + Security Headers
+# ============================================================
+
+{
+    # Global options
+    email {$ACME_EMAIL:admin@yourdomain.com}
+    admin off
+
+    # Reduce log noise
+    log {
+        level INFO
+        output stdout
+    }
+}
+
+# --- Main Application ---
+{$DOMAIN:localhost} {
+
+    # Security headers
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+        -X-Powered-By
+    }
+
+    # Compression
+    encode gzip zstd
+
+    # Access logs
+    log {
+        output stdout
+        format json
+    }
+
+    # Rate limiting
+    rate_limit {
+        zone dynamic {
+            key {remote_host}
+            events 60
+            window 10s
+        }
+    }
+
+    # Frontend (default)
+    reverse_proxy frontend:3000 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # API routes — proxy to gateway
+    handle_path /v1/* {
+        reverse_proxy gateway:8080 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+
+            # Streaming support (SSE)
+            flush_interval -1
+        }
+    }
+
+    # Health endpoints — proxy to gateway
+    handle_path /health* {
+        reverse_proxy gateway:8080
+    }
+
+    # Static files — served by frontend
+    handle_path /_next/* {
+        reverse_proxy frontend:3000
+    }
+}
+
+# --- API Subdomain ---
+{$API_DOMAIN:api.localhost} {
+
+    header {
+        X-Content-Type-Options "nosniff"
+        -Server
+        Access-Control-Allow-Origin "*"
+        Access-Control-Allow-Methods "GET, POST, OPTIONS"
+        Access-Control-Allow-Headers "Authorization, Content-Type, X-Request-ID"
+    }
+
+    encode gzip zstd
+
+    log {
+        output stdout
+        format json
+    }
+
+    rate_limit {
+        zone api {
+            key {remote_host}
+            events 120
+            window 10s
+        }
+    }
+
+    reverse_proxy gateway:8080 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        flush_interval -1
+    }
+
+    # CORS preflight
+    @options {
+        method OPTIONS
+    }
+    respond @options 204
+}
