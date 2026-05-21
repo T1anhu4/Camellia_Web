@@ -1,239 +1,161 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { CreditCard, Loader2, RefreshCw } from "lucide-react"
-import { toast } from "sonner"
+import { BarChart3, RefreshCw, Zap, TrendingUp, DollarSign, Activity } from "lucide-react"
 import { api } from "@/lib/api"
-import { cn, formatDate } from "@/lib/utils"
+import { cn, formatTokens, formatCents } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n"
-import { LangSwitcher } from "@/components/ui/lang-switcher"
+import { useAuth } from "@/hooks/use-auth"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useDashboard } from "@/hooks/use-dashboard"
-
-interface TokenPackage {
-  id: string
-  key: string
-  tokens: string
-  priceYuan: string
-  desc: string
-  rate: string
-}
-
-const PACKAGES: TokenPackage[] = [
-  { id: "5m", key: "billing.package.5m", tokens: "500万", priceYuan: "¥29", desc: "billing.package.5m.desc", rate: "¥0.0058/1K" },
-  { id: "10m", key: "billing.package.10m", tokens: "1000万", priceYuan: "¥49", desc: "billing.package.10m.desc", rate: "¥0.0049/1K" },
-  { id: "50m", key: "billing.package.50m", tokens: "5000万", priceYuan: "¥199", desc: "billing.package.50m.desc", rate: "¥0.0040/1K" },
-  { id: "100m", key: "billing.package.100m", tokens: "1亿", priceYuan: "¥349", desc: "billing.package.100m.desc", rate: "¥0.0035/1K" },
-]
+import { TokenChart } from "@/components/dashboard/token-chart"
+import { CostChart } from "@/components/dashboard/cost-chart"
+import { RequestsChart } from "@/components/dashboard/requests-chart"
 
 export default function BillingPage() {
   const { t } = useI18n()
-  const { user } = useDashboard()
-  const [selected, setSelected] = useState<string>("5m")
-  const [records, setRecords] = useState<any[]>([])
-  const [recordsLoading, setRecordsLoading] = useState(true)
-
-  const selectedPkg = PACKAGES.find((p) => p.id === selected)!
-
-  const loadRecords = useCallback(async () => {
-    setRecordsLoading(true)
-    try {
-      const data = await api.getMyBillingRecords()
-      setRecords(data)
-    } catch {
-      // silent
-    } finally {
-      setRecordsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { loadRecords() }, [loadRecords])
-
-  const balanceYuan = ((user?.balance_cents ?? 0) / 100).toFixed(2)
-
-  const handleBuy = () => {
-    toast.success(`${t("billing.buy")}: ${selectedPkg.priceYuan}`)
-  }
+  const { user } = useAuth()
 
   return (
     <>
-      <header className="mb-10 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">{t("billing.title")}</h1>
-          <p className="text-gray-400 text-sm mt-1">
-            {t("billing.currentBalance")}: <span className="text-brand-400 font-semibold">¥{balanceYuan}</span>
-          </p>
-        </div>
-        <LangSwitcher />
+      <header className="mb-8">
+        <h1 className="text-[28px] md:text-[36px] font-bold">{t("nav.billing")}</h1>
+        <p className="text-surface-600 text-sm mt-1">{t("billing.subtitle")}</p>
       </header>
+      <BillingContent t={t} user={user} />
+    </>
+  )
+}
 
-      <div className="space-y-10">
-        {/* Token package cards */}
-        <section>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {PACKAGES.map((pkg) => (
-              <button
-                key={pkg.id}
-                onClick={() => setSelected(pkg.id)}
-                className={cn(
-                  "glass-hover p-6 text-left transition-all duration-300",
-                  selected === pkg.id
-                    ? "ring-2 ring-brand-500 bg-brand-500/5 border-brand-500/30"
-                    : ""
-                )}
-              >
-                <div className="text-3xl font-bold mb-1">{pkg.tokens}</div>
-                <div className="text-xs text-gray-500 mb-3">{t(pkg.desc)}</div>
-                <div className="text-2xl font-bold text-brand-400 mb-1">{pkg.priceYuan}</div>
-                <div className="text-xs text-gray-500 mb-4">{t("billing.perTokenRate")}: {pkg.rate}</div>
-                <span className="btn-primary w-full text-sm py-2 inline-block text-center">
-                  {t("billing.buy")}
-                </span>
-              </button>
+function BillingContent({ t, user }: { t: any; user: any }) {
+  const [period, setPeriod] = useState("30d")
+  const [data, setData] = useState<any[]>([])
+  const [totals, setTotals] = useState<any>(null)
+  const [modelBreakdown, setModelBreakdown] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const end = new Date().toISOString().split("T")[0]
+      const start = new Date(Date.now() - (period === "7d" ? 7 : 30) * 86400000).toISOString().split("T")[0]
+      const res = await api.getUsage(start, end)
+      setData(res.data || [])
+      setTotals(res.totals || {})
+
+      // Model breakdown from the data or API
+      const models = await api.getModelUsage()
+      setModelBreakdown(models || [])
+    } catch {} finally { setLoading(false) }
+  }, [period])
+
+  useEffect(() => { load() }, [load])
+
+  const balanceTokens = (user?.daily_token_quota || 10000) - (user?.daily_token_used || 0)
+
+  return (
+    <div className="space-y-6">
+      {/* Top: Balance summary */}
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="card bg-surface-50 p-5">
+          <div className="flex items-center gap-2 text-sm text-surface-500 mb-2"><DollarSign className="w-4 h-4" />账户余额</div>
+          <div className="text-[28px] font-bold">{formatCents(user?.balance_cents || 0)}</div>
+          <div className="text-xs text-surface-500 mt-1">可用余额</div>
+        </div>
+        <div className="card bg-surface-50 p-5">
+          <div className="flex items-center gap-2 text-sm text-surface-500 mb-2"><Zap className="w-4 h-4" />Token 余量</div>
+          <div className="text-[28px] font-bold">{formatTokens(Math.max(0, balanceTokens))}</div>
+          <div className="text-xs text-surface-500 mt-1">今日剩余 / 配额 {formatTokens(user?.daily_token_quota || 10000)}</div>
+        </div>
+        <div className="card bg-surface-50 p-5">
+          <div className="flex items-center gap-2 text-sm text-surface-500 mb-2"><TrendingUp className="w-4 h-4" />今日用量</div>
+          <div className="text-[28px] font-bold">{formatTokens(user?.daily_token_used || 0)}</div>
+          <div className="text-xs text-surface-500 mt-1">Token 已消耗</div>
+        </div>
+        <div className="card bg-surface-50 p-5">
+          <div className="flex items-center gap-2 text-sm text-surface-500 mb-2"><Activity className="w-4 h-4" />累计请求</div>
+          <div className="text-[28px] font-bold">{totals?.total_requests?.toLocaleString() || 0}</div>
+          <div className="text-xs text-surface-500 mt-1">总请求次数</div>
+        </div>
+      </div>
+
+      {/* Period selector */}
+      <div className="flex items-center justify-between">
+        <div className="flex gap-2 bg-surface-100 rounded-lg p-1">
+          {["7d", "30d"].map(p => (
+            <button key={p} onClick={() => setPeriod(p)} className={cn("px-4 py-1.5 rounded-md text-sm font-medium transition-colors", period === p ? "bg-surface-950 text-white" : "text-surface-600 hover:text-surface-900")}>
+              {p === "7d" ? t("dashboard.period.7days") : t("dashboard.period.30days")}
+            </button>
+          ))}
+        </div>
+        <button onClick={load} className="btn-secondary text-sm py-1.5 px-3" disabled={loading}>
+          <RefreshCw className={cn("w-3 h-3 mr-1", loading && "animate-spin")} />{t("common.refresh")}
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="space-y-4">
+          <div className="grid lg:grid-cols-3 gap-5">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="card bg-white p-5 space-y-3"><Skeleton className="h-5 w-24" /><Skeleton className="h-[200px] w-full" /></div>
             ))}
           </div>
-        </section>
-
-        {/* Purchase form */}
-        <section className="grid lg:grid-cols-3 gap-6">
-          {/* Left: Package selection */}
-          <div className="glass p-6 space-y-4">
-            <h3 className="font-semibold">{t("billing.orderSummary")}</h3>
-
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-400">{t("billing.selectPackage")}</span>
-                <select
-                  value={selected}
-                  onChange={(e) => setSelected(e.target.value)}
-                  className="bg-surface-800 border border-surface-700 rounded-lg px-2 py-1 text-gray-200 text-sm"
-                >
-                  {PACKAGES.map((pkg) => (
-                    <option key={pkg.id} value={pkg.id}>
-                      {t(pkg.key)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">{t("billing.packagePrice")}</span>
-                <span>{selectedPkg.priceYuan}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">{t("billing.perTokenRate")}</span>
-                <span>{selectedPkg.rate}</span>
-              </div>
-              <hr className="border-white/10" />
-              <div className="flex justify-between font-semibold">
-                <span>{t("billing.total")}</span>
-                <span className="text-brand-400">{selectedPkg.priceYuan}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-400">{t("billing.currentBalance")}</span>
-                <span>¥{balanceYuan}</span>
-              </div>
-            </div>
-
-            <button onClick={handleBuy} className="btn-primary w-full">
-              {t("billing.buy")} — {selectedPkg.priceYuan}
-            </button>
+        </div>
+      ) : data.length === 0 ? (
+        <div className="card bg-white p-12 text-center text-surface-500">
+          <BarChart3 className="w-12 h-12 mx-auto mb-3 opacity-30" />
+          <p>暂无使用数据，发起你的第一个 API 请求吧</p>
+        </div>
+      ) : (
+        <>
+          {/* Charts */}
+          <div className="grid lg:grid-cols-3 gap-5">
+            <div className="card bg-white p-5"><h3 className="font-bold mb-4">Token 消耗趋势</h3><TokenChart data={data} /></div>
+            <div className="card bg-white p-5"><h3 className="font-bold mb-4">费用分布</h3><CostChart data={data} /></div>
+            <div className="card bg-white p-5"><h3 className="font-bold mb-4">请求数统计</h3><RequestsChart data={data} /></div>
           </div>
 
-          {/* Center: Alipay QR */}
-          <div className="glass p-6 flex flex-col items-center justify-center space-y-4">
-            <h3 className="font-semibold text-center">{t("billing.alipay")}</h3>
-            <p className="text-sm text-gray-400 text-center">{t("billing.scanQR")}</p>
-            <div className="w-48 h-48 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center">
-              <div className="text-center text-gray-500">
-                <CreditCard className="w-10 h-10 mx-auto mb-2 text-blue-400 opacity-50" />
-                <span className="text-xs text-blue-400/60">支付宝</span>
-                <br />
-                <span className="text-xs text-gray-600">Alipay</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Payment info */}
-          <div className="glass p-6 space-y-3">
-            <h3 className="font-semibold">{t("billing.payment")}</h3>
-            <div className="space-y-2 text-sm text-gray-400">
-              <p>1. {t("billing.selectPackage")}</p>
-              <p>2. {t("billing.scanQR")}</p>
-              <p>3. {t("billing.buy")}</p>
-            </div>
-            <div className="mt-4 p-3 rounded-lg bg-brand-500/10 border border-brand-500/20 text-xs text-gray-300">
-              {selectedPkg.tokens} / {selectedPkg.priceYuan} / {selectedPkg.rate} per 1K tokens
-            </div>
-          </div>
-        </section>
-
-        {/* Transaction history */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">{t("billing.transactionHistory")}</h3>
-            <button onClick={loadRecords} className="btn-secondary text-xs py-1.5 px-3" disabled={recordsLoading}>
-              <RefreshCw className={cn("w-3 h-3 mr-1", recordsLoading && "animate-spin")} />
-              {t("common.refresh")}
-            </button>
-          </div>
-
-          {recordsLoading ? (
-            <div className="glass p-4 space-y-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="flex justify-between">
-                  <Skeleton className="h-4 w-32" />
-                  <Skeleton className="h-4 w-20" />
-                </div>
-              ))}
-            </div>
-          ) : records.length === 0 ? (
-            <div className="glass p-12 text-center text-gray-500">
-              <CreditCard className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>{t("billing.emptyHistory")}</p>
-            </div>
-          ) : (
-            <div className="glass overflow-hidden">
+          {/* Model Breakdown Table */}
+          <div className="card bg-white p-5">
+            <h3 className="font-bold mb-4">模型用量明细</h3>
+            {modelBreakdown.length === 0 ? (
+              <p className="text-surface-500 text-sm text-center py-8">暂无模型调用记录</p>
+            ) : (
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-white/5 text-gray-400 text-xs uppercase">
-                    <th className="text-left px-4 py-3">{t("admin.billing.colTime")}</th>
-                    <th className="text-left px-4 py-3">{t("admin.billing.colModel")}</th>
-                    <th className="text-right px-4 py-3">{t("admin.billing.colTokens")}</th>
-                    <th className="text-right px-4 py-3">{t("admin.billing.colCost")}</th>
-                    <th className="text-right px-4 py-3">{t("admin.billing.colStatus")}</th>
+                  <tr className="border-b border-surface-200">
+                    <th className="text-left py-3 px-3 font-medium text-surface-500 uppercase text-xs">模型</th>
+                    <th className="text-right py-3 px-3 font-medium text-surface-500 uppercase text-xs">请求数</th>
+                    <th className="text-right py-3 px-3 font-medium text-surface-500 uppercase text-xs">Token 用量</th>
+                    <th className="text-right py-3 px-3 font-medium text-surface-500 uppercase text-xs">费用</th>
+                    <th className="text-right py-3 px-3 font-medium text-surface-500 uppercase text-xs">占比</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {records.map((r) => (
-                    <tr key={r.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                      <td className="px-4 py-3 text-gray-400 text-xs">{formatDate(r.created_at)}</td>
-                      <td className="px-4 py-3">{r.model_name}</td>
-                      <td className="px-4 py-3 text-right font-mono tabular-nums">
-                        {r.total_tokens?.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono tabular-nums">
-                        ¥{(r.cost_cents / 100).toFixed(4)}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span
-                          className={cn(
-                            "text-xs px-2 py-0.5 rounded-full",
-                            r.status === "success"
-                              ? "bg-green-500/10 text-green-400"
-                              : "bg-red-500/10 text-red-400"
-                          )}
-                        >
-                          {r.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {modelBreakdown.map((m: any, i: number) => {
+                    const pct = totals?.total_tokens > 0 ? ((m.total_tokens || 0) / totals.total_tokens * 100).toFixed(1) : 0
+                    return (
+                      <tr key={i} className="border-b border-surface-100">
+                        <td className="py-3 px-3 font-mono text-xs">{m.model_name}</td>
+                        <td className="py-3 px-3 text-right">{(m.total_requests || 0).toLocaleString()}</td>
+                        <td className="py-3 px-3 text-right">{formatTokens(m.total_tokens || 0)}</td>
+                        <td className="py-3 px-3 text-right">{formatCents(m.total_cost || 0)}</td>
+                        <td className="py-3 px-3 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <div className="w-16 h-1.5 bg-surface-200 rounded-full overflow-hidden">
+                              <div className="h-full bg-surface-950 rounded-full" style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className="text-xs text-surface-500">{pct}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
-            </div>
-          )}
-        </section>
-      </div>
-    </>
+            )}
+          </div>
+        </>
+      )}
+    </div>
   )
 }

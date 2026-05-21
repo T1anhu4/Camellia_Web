@@ -69,7 +69,8 @@ function SidebarContent({ user, onLogout, onNav }: { user: any; onLogout: () => 
   const links = [
     { href: "/dashboard", icon: BarChart3, label: t("nav.dashboard") },
     { href: "/dashboard/keys", icon: Key, label: t("nav.keys") },
-    { href: "/dashboard/billing", icon: CreditCard, label: t("nav.billing") },
+    { href: "/dashboard/wallet", icon: CreditCard, label: t("nav.wallet") },
+    { href: "/dashboard/billing", icon: BarChart3, label: t("nav.billing") },
     { href: "/dashboard/settings", icon: Settings, label: t("nav.settings") },
   ]
 

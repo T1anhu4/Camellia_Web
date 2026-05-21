@@ -186,74 +186,192 @@ function UsersTab() {
 
 function ChannelsTab() {
   const { t } = useI18n()
-  const [channels, setChannels] = useState<any[]>([])
+  const [pools, setPools] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ name: "", provider: "openai", api_key: "", base_url: "https://api.openai.com", models: "", weight: 1, priority: 0, max_concurrency: 10 })
+  const [selectedPool, setSelectedPool] = useState<any>(null)
+  const [poolKeys, setPoolKeys] = useState<any[]>([])
+  const [showNewPool, setShowNewPool] = useState(false)
+  const [showAddKey, setShowAddKey] = useState(false)
+  const [newPool, setNewPool] = useState({ name: "", display_name: "", input_price: 2, output_price: 8, pricing_mode: "per_token" as "per_token"|"per_call", per_call_price: 1 })
+  const [newKey, setNewKey] = useState({ api_key: "", base_url: "", key_priority: 3, key_name: "", notes: "", max_concurrency: 10 })
+  const [editingKey, setEditingKey] = useState<any>(null)
+  const [editingPool, setEditingPool] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
-  const providerPresets: Record<string, { base: string; models: string }> = {
-    openai: { base: "https://api.openai.com", models: "gpt-4o,gpt-4o-mini,gpt-4-turbo" },
-    azure: { base: "https://YOUR-RESOURCE.openai.azure.com", models: "gpt-4,gpt-4o-mini" },
-    anthropic: { base: "https://api.anthropic.com", models: "claude-4-sonnet,claude-4-haiku" },
-    google: { base: "https://generativelanguage.googleapis.com", models: "gemini-pro,gemini-flash" },
-    deepseek: { base: "https://api.deepseek.com", models: "deepseek-chat,deepseek-coder" },
-    custom: { base: "", models: "" },
+  const loadPools = useCallback(async () => { setLoading(true); try { setPools(await api.getModelPools()) } catch {} finally { setLoading(false) } }, [])
+  useEffect(() => { loadPools() }, [loadPools])
+
+  const loadPoolDetail = async (poolId: string) => {
+    try { const d = await api.getModelPool(poolId); setSelectedPool(d.pool); setPoolKeys(d.keys); setShowAddKey(false) } catch {}
   }
 
-  const load = useCallback(async () => { setLoading(true); try { setChannels(await api.getChannels()) } catch {} finally { setLoading(false) } }, [])
-  useEffect(() => { load() }, [load])
-
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreatePool = async (e: React.FormEvent) => {
     e.preventDefault(); setSubmitting(true)
-    try { await api.createChannel({ ...form, models: form.models.split(",").map(s => s.trim()).filter(Boolean) }); toast.success(t("admin.toast.channelCreated")); setShowForm(false); load() }
+    try { await api.createModelPool({ name: newPool.name.trim(), display_name: newPool.display_name || newPool.name, input_price_cents: Math.round(newPool.input_price * 100), output_price_cents: Math.round(newPool.output_price * 100), per_call_price_cents: Math.round(newPool.per_call_price * 100), pricing_mode: newPool.pricing_mode }); setShowNewPool(false); setNewPool({ name: "", display_name: "", input_price: 2, output_price: 8, pricing_mode: "per_token", per_call_price: 1 }); loadPools() }
     catch (err: any) { toast.error(err.message) } finally { setSubmitting(false) }
   }
 
-  const handleDelete = async (id: string) => { if (!confirm(t("admin.channels.deleteConfirm"))) return; try { await api.deleteChannel(id); toast.success(t("admin.toast.channelDeleted")); load() } catch (err: any) { toast.error(err.message) } }
+  const handleAddKey = async (e: React.FormEvent) => {
+    e.preventDefault(); setSubmitting(true)
+    try {
+      await api.createChannel({ name: newKey.key_name || selectedPool.name, provider: "custom", api_key: newKey.api_key, base_url: newKey.base_url, models: [selectedPool.name], weight: 1, priority: 0, max_concurrency: newKey.max_concurrency, model_pool_id: selectedPool.id, key_priority: newKey.key_priority, notes: newKey.notes })
+      toast.success("Key 已添加"); setShowAddKey(false); setNewKey({ api_key: "", base_url: "", key_priority: 3, key_name: "", notes: "", max_concurrency: 10 }); loadPoolDetail(selectedPool.id)
+    } catch (err: any) { toast.error(err.message) } finally { setSubmitting(false) }
+  }
+
+  const handleDeleteKey = async (id: string) => { if (!confirm("删除此 Key？")) return; try { await api.deleteChannel(id); toast.success("已删除"); loadPoolDetail(selectedPool.id) } catch (err: any) { toast.error(err.message) } }
+
+  if (selectedPool) {
+    return (
+      <div className="space-y-4">
+        <button onClick={() => setSelectedPool(null)} className="text-sm text-surface-600 hover:text-surface-950 flex items-center gap-1"><ChevronLeft className="w-4 h-4" />返回模型池列表</button>
+        <div className="card bg-white p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div><h2 className="text-xl font-bold">{selectedPool.display_name || selectedPool.name}</h2><p className="text-sm text-surface-500 mt-1">模型池 · {poolKeys.length} 个 Key</p></div>
+            <div className="flex gap-2">
+              <span className={cn("px-2 py-1 rounded text-xs font-medium", selectedPool.is_active ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")}>{selectedPool.is_active ? "启用" : "停用"}</span>
+            </div>
+          </div>
+
+          {/* Health bar */}
+          <div className="mb-4">
+            <div className="flex justify-between text-xs text-surface-500 mb-1"><span>Key 健康度</span><span>{poolKeys.filter((k: any) => k.status === "active").length}/{poolKeys.length} 活跃</span></div>
+            <div className="h-2 bg-surface-200 rounded-full overflow-hidden">
+              <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${poolKeys.length > 0 ? (poolKeys.filter((k: any) => k.status === "active").length / poolKeys.length * 100) : 0}%` }} />
+            </div>
+          </div>
+
+          {/* Priority legend */}
+          <div className="flex gap-2 mb-4 text-xs">
+            {[0,1,2,3,4,5].map(p => (
+              <span key={p} className={cn("px-2 py-0.5 rounded font-medium", p <= 1 ? "bg-red-100 text-red-700" : p <= 3 ? "bg-amber-100 text-amber-700" : "bg-surface-100 text-surface-600")}>P{p} — {p === 0 ? "最高" : p === 5 ? "最低" : `级别${p}`}</span>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold">API Keys ({poolKeys.length})</h3>
+          <button onClick={() => setShowAddKey(!showAddKey)} className="btn-primary text-sm"><Plus className="w-4 h-4 mr-1" />添加 Key</button>
+        </div>
+
+        {showAddKey && (
+          <form onSubmit={handleAddKey} className="card bg-white p-5 space-y-3">
+            <h4 className="font-bold text-sm">添加 API Key 到 {selectedPool.name}</h4>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div><label className="text-xs text-surface-600 mb-0.5 block">Key 名称</label><input value={newKey.key_name} onChange={e => setNewKey({ ...newKey, key_name: e.target.value })} placeholder="可选标识" className="input-field" /></div>
+              <div><label className="text-xs text-surface-600 mb-0.5 block">优先级 (0最高-5最低)</label><select value={newKey.key_priority} onChange={e => setNewKey({ ...newKey, key_priority: +e.target.value })} className="input-field"><option value={0}>P0 — 最高</option><option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3 — 默认</option><option value={4}>P4</option><option value={5}>P5 — 最低</option></select></div>
+              <div className="sm:col-span-2"><label className="text-xs text-surface-600 mb-0.5 block">API Key *</label><input value={newKey.api_key} onChange={e => setNewKey({ ...newKey, api_key: e.target.value })} placeholder="sk-..." className="input-field" required /></div>
+              <div className="sm:col-span-2"><label className="text-xs text-surface-600 mb-0.5 block">Base URL *</label><input value={newKey.base_url} onChange={e => setNewKey({ ...newKey, base_url: e.target.value })} placeholder="https://api.xxx.com" className="input-field" required /></div>
+              <div><label className="text-xs text-surface-600 mb-0.5 block">最大并发</label><input value={newKey.max_concurrency} onChange={e => setNewKey({ ...newKey, max_concurrency: +e.target.value })} type="number" min={1} className="input-field" /></div>
+              <div className="sm:col-span-2"><label className="text-xs text-surface-600 mb-0.5 block">备注</label><input value={newKey.notes} onChange={e => setNewKey({ ...newKey, notes: e.target.value })} placeholder="来源、用途等备注信息" className="input-field" /></div>
+            </div>
+            <button type="submit" disabled={submitting} className="btn-primary">{submitting ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}添加 Key</button>
+          </form>
+        )}
+
+        <div className="card bg-white overflow-hidden">
+          {poolKeys.length === 0 ? <div className="p-8 text-center text-surface-500 text-sm">此模型池还没有 Key，点击"添加 Key"导入</div> : (
+            <table className="w-full text-sm">
+              <thead><tr className="border-b border-surface-200">
+                <th className="text-left py-3 px-3 text-xs font-medium text-surface-500">名称</th>
+                <th className="text-left py-3 px-3 text-xs font-medium text-surface-500">API Key</th>
+                <th className="text-left py-3 px-3 text-xs font-medium text-surface-500">优先级</th>
+                <th className="text-left py-3 px-3 text-xs font-medium text-surface-500">状态</th>
+                <th className="text-left py-3 px-3 text-xs font-medium text-surface-500">备注</th>
+                <th className="text-right py-3 px-3 text-xs font-medium text-surface-500">操作</th>
+              </tr></thead>
+              <tbody>
+                {poolKeys.map((k: any) => (
+                  <tr key={k.id} className="border-b border-surface-100">
+                    <td className="py-2.5 px-3 font-mono text-xs">{k.key_name || k.name}</td>
+                    <td className="py-2.5 px-3 font-mono text-xs text-surface-600 max-w-[180px] truncate" title={k.api_key_enc ? "(加密存储)" : ""}>{k.key_prefix || "***"}</td>
+                    <td className="py-2.5 px-3"><span className={cn("px-1.5 py-0.5 rounded text-xs font-bold", k.key_priority <= 1 ? "bg-red-100 text-red-700" : k.key_priority <= 3 ? "bg-amber-100 text-amber-700" : "bg-surface-100 text-surface-600")}>P{k.key_priority}</span></td>
+                    <td className="py-2.5 px-3"><Badge variant={k.status === "active" ? "success" : "danger"}>{k.status}</Badge></td>
+                    <td className="py-2.5 px-3 text-xs text-surface-500 max-w-[120px] truncate">{k.notes || "-"}</td>
+                    <td className="py-2.5 px-3 text-right flex gap-1 justify-end">
+                      <button onClick={() => setEditingKey(editingKey?.id === k.id ? null : k)} className="p-1 rounded hover:bg-surface-100" title="编辑"><Settings className="w-3.5 h-3.5 text-surface-500" /></button>
+                      <button onClick={() => handleDeleteKey(k.id)} className="p-1 rounded hover:bg-red-50"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Edit Key Modal */}
+        {editingKey && (
+          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center" onClick={() => setEditingKey(null)}>
+            <div className="card bg-white p-6 w-full max-w-lg mx-4 space-y-3" onClick={e => e.stopPropagation()}>
+              <div className="flex justify-between"><h3 className="font-bold">编辑 Key</h3><button onClick={() => setEditingKey(null)}><X className="w-4 h-4" /></button></div>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div><label className="text-xs text-surface-600 mb-0.5 block">名称</label><input value={editingKey.key_name || editingKey.name} onChange={e => setEditingKey({ ...editingKey, key_name: e.target.value })} className="input-field" /></div>
+                <div><label className="text-xs text-surface-600 mb-0.5 block">优先级</label><select value={editingKey.key_priority} onChange={e => setEditingKey({ ...editingKey, key_priority: +e.target.value })} className="input-field"><option value={0}>P0</option><option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option><option value={4}>P4</option><option value={5}>P5</option></select></div>
+                <div className="sm:col-span-2"><label className="text-xs text-surface-600 mb-0.5 block">API Key (留空不修改)</label><input value={editingKey._newKey || ""} onChange={e => setEditingKey({ ...editingKey, _newKey: e.target.value })} type="password" placeholder="留空则不修改" className="input-field" /></div>
+                <div className="sm:col-span-2"><label className="text-xs text-surface-600 mb-0.5 block">Base URL</label><input value={editingKey.base_url || ""} onChange={e => setEditingKey({ ...editingKey, base_url: e.target.value })} className="input-field" /></div>
+                <div><label className="text-xs text-surface-600 mb-0.5 block">并发数</label><input value={editingKey.max_concurrency} onChange={e => setEditingKey({ ...editingKey, max_concurrency: +e.target.value })} type="number" min={1} className="input-field" /></div>
+                <div><label className="text-xs text-surface-600 mb-0.5 block">备注</label><input value={editingKey.notes || ""} onChange={e => setEditingKey({ ...editingKey, notes: e.target.value })} className="input-field" /></div>
+              </div>
+              <button onClick={async () => { try { await api.updateChannel({ id: editingKey.id, key_name: editingKey.key_name, key_priority: editingKey.key_priority, base_url: editingKey.base_url, max_concurrency: editingKey.max_concurrency, notes: editingKey.notes, ...(editingKey._newKey ? { api_key: editingKey._newKey } : {}) }); setEditingKey(null); toast.success("已更新"); loadPoolDetail(selectedPool.id) } catch (err: any) { toast.error(err.message) } }} className="btn-primary w-full">保存</button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <button onClick={load} className="btn-secondary text-sm" disabled={loading}><RefreshCw className={cn("w-4 h-4 mr-1.5", loading && "animate-spin")} />{t("common.refresh")}</button>
-        <button onClick={() => setShowForm(!showForm)} className="btn-primary"><Plus className="w-4 h-4 mr-1.5" />{t("admin.channels.newChannel")}</button>
+        <button onClick={loadPools} className="btn-secondary text-sm" disabled={loading}><RefreshCw className={cn("w-4 h-4 mr-1.5", loading && "animate-spin")} />{t("common.refresh")}</button>
+        <button onClick={() => setShowNewPool(!showNewPool)} className="btn-primary"><Plus className="w-4 h-4 mr-1.5" />新建模型池</button>
       </div>
 
-      {showForm && (
-        <form onSubmit={handleCreate} className="card bg-white p-6 space-y-4">
-          <div className="flex items-center justify-between"><h3 className="font-bold">{t("admin.channels.formTitle")}</h3><button type="button" onClick={() => setShowForm(false)} className="p-1 hover:bg-surface-100 rounded"><X className="w-4 h-4" /></button></div>
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div><label className="text-xs text-surface-600 mb-1 block">{t("admin.channels.nameLabel")}</label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder={t("admin.channels.namePlaceholder")} className="input-field" required /></div>
-            <div><label className="text-xs text-surface-600 mb-1 block">{t("admin.channels.providerLabel")}</label>
-              <select value={form.provider} onChange={e => { const preset = providerPresets[e.target.value] || { base: "", models: "" }; setForm({ ...form, provider: e.target.value, base_url: preset.base, models: preset.models }) }} className="input-field">
-                {["openai","azure","anthropic","google","deepseek","custom"].map(p => <option key={p} value={p}>{p}</option>)}
+      {showNewPool && (
+        <form onSubmit={handleCreatePool} className="card bg-white p-5 space-y-3">
+          <div className="flex items-center justify-between"><h3 className="font-bold">新建模型池</h3><button type="button" onClick={() => setShowNewPool(false)}><X className="w-4 h-4" /></button></div>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div><label className="text-xs text-surface-600 mb-0.5 block">模型名称 *</label><input value={newPool.name} onChange={e => setNewPool({ ...newPool, name: e.target.value })} placeholder="gpt-5.1" className="input-field" required /></div>
+            <div><label className="text-xs text-surface-600 mb-0.5 block">显示名称</label><input value={newPool.display_name} onChange={e => setNewPool({ ...newPool, display_name: e.target.value })} placeholder="GPT 5.1" className="input-field" /></div>
+            <div className="sm:col-span-2"><label className="text-xs text-surface-600 mb-0.5 block">计费模式</label>
+              <select value={newPool.pricing_mode} onChange={e => setNewPool({ ...newPool, pricing_mode: e.target.value as any })} className="input-field">
+                <option value="per_token">按量 — 每 1M Tokens 计费</option>
+                <option value="per_call">按次 — 每次请求固定价格</option>
               </select>
             </div>
-            <div><label className="text-xs text-surface-600 mb-1 block">{t("admin.channels.apiKeyLabel")}</label><input value={form.api_key} onChange={e => setForm({ ...form, api_key: e.target.value })} type="password" placeholder={t("admin.channels.apiKeyPlaceholder")} className="input-field" required /></div>
-            <div><label className="text-xs text-surface-600 mb-1 block">{t("admin.channels.baseUrlLabel")}</label><input value={form.base_url} onChange={e => setForm({ ...form, base_url: e.target.value })} placeholder={t("admin.channels.baseUrlPlaceholder")} className="input-field" required /></div>
-            <div><label className="text-xs text-surface-600 mb-1 block">{t("admin.channels.modelsLabel")}</label><input value={form.models} onChange={e => setForm({ ...form, models: e.target.value })} placeholder={t("admin.channels.modelsPlaceholder")} className="input-field" /></div>
-            <div className="grid grid-cols-3 gap-3">
-              <div><label className="text-xs text-surface-600 mb-1 block">{t("admin.channels.weightLabel")}</label><input value={form.weight} onChange={e => setForm({ ...form, weight: +e.target.value })} type="number" min={1} className="input-field" /></div>
-              <div><label className="text-xs text-surface-600 mb-1 block">{t("admin.channels.priorityLabel")}</label><input value={form.priority} onChange={e => setForm({ ...form, priority: +e.target.value })} type="number" min={0} className="input-field" /></div>
-              <div><label className="text-xs text-surface-600 mb-1 block">{t("admin.channels.concurrencyLabel")}</label><input value={form.max_concurrency} onChange={e => setForm({ ...form, max_concurrency: +e.target.value })} type="number" min={1} className="input-field" /></div>
-            </div>
+            {newPool.pricing_mode === "per_token" ? <>
+              <div><label className="text-xs text-surface-600 mb-0.5 block">输入价格 (¥/1M Tokens)</label><input value={newPool.input_price} onChange={e => setNewPool({ ...newPool, input_price: +e.target.value })} type="number" min={0} step={0.1} className="input-field" /></div>
+              <div><label className="text-xs text-surface-600 mb-0.5 block">输出价格 (¥/1M Tokens)</label><input value={newPool.output_price} onChange={e => setNewPool({ ...newPool, output_price: +e.target.value })} type="number" min={0} step={0.1} className="input-field" /></div>
+            </> : <>
+              <div className="sm:col-span-2"><label className="text-xs text-surface-600 mb-0.5 block">每次价格 (元/次)</label><input value={newPool.per_call_price} onChange={e => setNewPool({ ...newPool, per_call_price: +e.target.value })} type="number" min={0} step={0.01} className="input-field" /></div>
+            </>}
           </div>
-          <button type="submit" disabled={submitting} className="btn-primary">{submitting ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : null}{t("admin.channels.createButton")}</button>
+          <button type="submit" disabled={submitting} className="btn-primary">{submitting ? "..." : "创建模型池"}</button>
         </form>
       )}
 
-      <div className="card bg-white overflow-hidden">
-        {loading ? <div className="p-6"><TableSkeleton rows={5} cols={7} /></div> : (
-          <DataTable columns={[
-            { key: "name", header: t("admin.channels.colName") },
-            { key: "provider", header: t("admin.channels.colProvider"), render: (r: any) => <Badge>{r.provider}</Badge> },
-            { key: "models", header: t("admin.channels.colModels"), render: (r: any) => <div className="flex flex-wrap gap-1 max-w-[200px]">{(r.models||[]).slice(0,3).map((m:string) => <Badge key={m} variant="info">{m}</Badge>)}</div> },
-            { key: "status", header: t("admin.channels.colStatus"), render: (r: any) => <Badge variant={r.status==="active"?"success":"danger"}>{r.status}</Badge> },
-            { key: "weight", header: t("admin.channels.colWeight") },
-            { key: "max_concurrency", header: t("admin.channels.colConcurrency") },
-            { key: "actions", header: t("admin.channels.colActions"), render: (r: any) => <button onClick={e => { e.stopPropagation(); handleDelete(r.id) }} className="p-1.5 rounded-lg hover:bg-red-50"><Trash2 className="w-4 h-4 text-red-500" /></button> },
-          ]} data={channels} emptyMessage={t("admin.channels.empty")} />
-        )}
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {loading ? Array.from({ length: 3 }).map((_, i) => <div key={i} className="card bg-white p-5"><Skeleton className="h-5 w-32 mb-3" /><Skeleton className="h-3 w-24 mb-2" /><Skeleton className="h-2 w-full" /></div>) : pools.length === 0 ? (
+          <div className="col-span-full card bg-white p-12 text-center text-surface-500">暂无模型池，点击"新建模型池"创建</div>
+        ) : pools.map(pool => (
+          <div key={pool.id} onClick={() => loadPoolDetail(pool.id)} className="card bg-white p-5 cursor-pointer hover:ring-2 hover:ring-surface-950 transition-all">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-bold text-lg">{pool.display_name || pool.name}</h3>
+              <ChevronRight className="w-4 h-4 text-surface-400" />
+            </div>
+            <p className="text-xs text-surface-500 font-mono mb-3">{pool.name}</p>
+            <div className="flex justify-between text-xs text-surface-500 mb-2">
+              <span>Key 活跃度</span>
+              <span>{pool.active_keys || 0}/{pool.total_keys || 0}</span>
+            </div>
+            <div className="h-2 bg-surface-200 rounded-full overflow-hidden">
+              <div className="h-full bg-surface-950 rounded-full transition-all" style={{ width: `${pool.total_keys > 0 ? ((pool.active_keys || 0) / pool.total_keys * 100) : 0}%` }} />
+            </div>
+            <div className="mt-3 text-xs text-surface-500">
+              输入 ¥{(pool.input_price_cents / 100).toFixed(2)} / 输出 ¥{(pool.output_price_cents / 100).toFixed(2)} / 1M tokens
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )

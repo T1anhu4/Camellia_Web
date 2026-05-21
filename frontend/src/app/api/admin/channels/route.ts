@@ -54,13 +54,13 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { name, provider, api_key, base_url, models, weight, priority, max_concurrency } = body
+    const { name, provider, api_key, base_url, models, weight, priority, max_concurrency, model_pool_id, key_priority, key_name } = body
 
     if (!name || !api_key || !base_url) {
       return NextResponse.json({ error: "name, api_key, and base_url are required" }, { status: 400 })
     }
 
-    // Convert models to PostgreSQL array: "a,b,c" → ["a","b","c"] or use as-is if array
+    // Convert models to PostgreSQL array
     let modelsArr: string[]
     if (Array.isArray(models)) {
       modelsArr = models
@@ -71,18 +71,21 @@ export async function POST(req: NextRequest) {
     }
 
     const ch = await queryOne<{ id: string }>(
-      `INSERT INTO channels (name, provider, api_key_enc, base_url, models, weight, priority, max_concurrency)
-       VALUES ($1, $2::provider_type, $3, $4, $5::text[], $6, $7, $8)
+      `INSERT INTO channels (name, provider, api_key_enc, base_url, models, weight, priority, max_concurrency, model_pool_id, key_priority, key_name)
+       VALUES ($1, $2::provider_type, $3, $4, $5::text[], $6, $7, $8, $9, $10, $11)
        RETURNING id`,
       [
-        name,
-        provider || "openai",
+        key_name || name || "Imported",
+        provider || "custom",
         encrypt(api_key),
         base_url,
         modelsArr,
         weight || 1,
         priority || 0,
         max_concurrency || 10,
+        model_pool_id || null,
+        key_priority ?? 3,
+        key_name || null,
       ]
     )
 
@@ -91,6 +94,29 @@ export async function POST(req: NextRequest) {
     console.error("admin channel create error:", err)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const session = await getSession()
+    if (!session || session.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    const body = await req.json()
+    const { id, api_key, base_url, key_priority, key_name, notes, max_concurrency } = body
+    if (!id) return NextResponse.json({ error: "id required" }, { status: 400 })
+
+    const sets: string[] = []; const params: any[] = [id]; let idx = 2
+    if (api_key) { sets.push(`api_key_enc = $${idx++}`); params.push(encrypt(api_key)) }
+    if (base_url) { sets.push(`base_url = $${idx++}`); params.push(base_url) }
+    if (key_priority !== undefined) { sets.push(`key_priority = $${idx++}`); params.push(key_priority) }
+    if (key_name !== undefined) { sets.push(`key_name = $${idx++}`); params.push(key_name) }
+    if (notes !== undefined) { sets.push(`notes = $${idx++}`); params.push(notes) }
+    if (max_concurrency !== undefined) { sets.push(`max_concurrency = $${idx++}`); params.push(max_concurrency) }
+    if (sets.length === 0) return NextResponse.json({ error: "no fields" }, { status: 400 })
+    sets.push("updated_at = NOW()")
+
+    await execute(`UPDATE channels SET ${sets.join(", ")} WHERE id = $1`, params)
+    return NextResponse.json({ success: true })
+  } catch (err) { console.error("channel patch error:", err); return NextResponse.json({ error: "Internal server error" }, { status: 500 }) }
 }
 
 export async function DELETE(req: NextRequest) {

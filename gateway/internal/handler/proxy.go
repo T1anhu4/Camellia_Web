@@ -84,6 +84,8 @@ func ChatCompletions(deps *HandlerDeps) fiber.Handler {
 		if model == "" {
 			model = "gpt-4o-mini"
 		}
+		model = resolveModel(c.Context(), deps, model)
+		reqBody["model"] = model
 		stream, _ := reqBody["stream"].(bool)
 
 		// --- Tier 4: Accurate token counting with tiktoken ---
@@ -388,6 +390,7 @@ func Embeddings(deps *HandlerDeps) fiber.Handler {
 		if model == "" {
 			model = "text-embedding-3-small"
 		}
+		model = resolveModel(c.Context(), deps, model)
 
 		channel, err := deps.Pool.AcquireChannel(c.Context(), model)
 		if err != nil {
@@ -441,20 +444,7 @@ func Embeddings(deps *HandlerDeps) fiber.Handler {
 	}
 }
 
-// ListModels returns available models.
-func ListModels(deps *HandlerDeps) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{
-			"object": "list",
-			"data": []fiber.Map{
-				{"id": "gpt-4o-mini", "object": "model", "owned_by": "openai"},
-				{"id": "gpt-4o", "object": "model", "owned_by": "openai"},
-				{"id": "claude-4-haiku", "object": "model", "owned_by": "anthropic"},
-				{"id": "text-embedding-3-small", "object": "model", "owned_by": "openai"},
-			},
-		})
-	}
-}
+// ListModels moved to list_models.go
 
 // --- Helpers ---
 

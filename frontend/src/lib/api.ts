@@ -40,6 +40,9 @@ class ApiClient {
   async logout() { return this.post("/api/auth/logout") }
 
   // --- Dashboard ---
+  async getModelUsage() {
+    return this.get<Array<{ model_name: string; total_requests: number; total_tokens: number; total_cost: number }>>("/api/dashboard/model-usage")
+  }
   async getUsage(start: string, end: string) {
     return this.get<{ data: Array<{ date: string; tokens: number; cost: number; requests: number }>; totals: Record<string, number> }>(
       `/api/dashboard/usage?start=${start}&end=${end}`
@@ -73,6 +76,12 @@ class ApiClient {
   async getChannels() { return this.get<any[]>("/api/admin/channels") }
   async createChannel(data: Record<string, unknown>) { return this.post("/api/admin/channels", data) }
   async deleteChannel(id: string) { return this.del(`/api/admin/channels?id=${id}`) }
+  async getModelPools() { return this.get<any[]>("/api/admin/model-pools") }
+  async getModelPool(id: string) { return this.get<{ pool: any; keys: any[] }>(`/api/admin/model-pools?id=${id}`) }
+  async createModelPool(data: Record<string, unknown>) { return this.post("/api/admin/model-pools", data) }
+  async updateModelPool(data: Record<string, unknown>) { return this.patch("/api/admin/model-pools", data) }
+  async deleteModelPool(id: string) { return this.del(`/api/admin/model-pools?id=${id}`) }
+  async updateChannel(data: Record<string, unknown>) { return this.patch("/api/admin/channels", data) }
 
   // --- Admin: Pricing ---
   async getPricing() { return this.get<any[]>("/api/admin/pricing") }
