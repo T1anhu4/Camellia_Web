@@ -15,6 +15,12 @@ export function formatCents(cents: number): string {
   return `¥${(cents / 100).toFixed(2)}`
 }
 
+// Format cost from 10^-8 yuan units to ¥ with 8 decimal places
+export function formatCost(subunits: number): string {
+  const yuan = subunits / 100_000_000
+  return `¥${yuan.toFixed(8)}`
+}
+
 export function formatDate(d: string | Date): string {
   return new Date(d).toLocaleDateString("en-US", {
     month: "short",

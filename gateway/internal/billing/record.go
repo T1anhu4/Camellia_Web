@@ -33,10 +33,9 @@ func RecordUsageDetailed(pg *pgxpool.Pool, rdb *redis.Client,
 
 	if err == nil {
 		if poolMode == "per_call" && perCallCents > 0 {
-			costCents = int64(perCallCents)
+			costCents = int64(perCallCents) * 1_000_000
 		} else if poolIn > 0 || poolOut > 0 {
-			costCents = int64(float64(promptTokens)*float64(poolIn)/1000000.0 +
-				float64(completionTokens)*float64(poolOut)/1000000.0)
+			costCents = int64(promptTokens)*int64(poolIn) + int64(completionTokens)*int64(poolOut)
 		}
 	} else {
 		var inPrice, outPrice float64
@@ -45,17 +44,14 @@ func RecordUsageDetailed(pg *pgxpool.Pool, rdb *redis.Client,
 			model,
 		).Scan(&pricingID, &inPrice, &outPrice)
 		if err == nil {
-			costCents = int64(float64(promptTokens)/1000.0*inPrice*100 +
-				float64(completionTokens)/1000.0*outPrice*100)
+			costCents = int64(float64(promptTokens)*inPrice*100_000 + float64(completionTokens)*outPrice*100_000)
 		}
 	}
-	if costCents < 1 {
-		costCents = 1
-	}
+	// No minimum floor — precise billing to 8 decimal places
 
 	var balanceAfter int64
 	err = pg.QueryRow(ctx,
-		`UPDATE users SET balance_cents = balance_cents - $1, daily_token_used = daily_token_used + $2, updated_at = NOW()
+		`UPDATE users SET balance_cents = balance_cents - $1 / 1000000, daily_token_used = daily_token_used + $2, updated_at = NOW()
 		 WHERE id = $3 RETURNING balance_cents`,
 		costCents, totalTokens, userID,
 	).Scan(&balanceAfter)

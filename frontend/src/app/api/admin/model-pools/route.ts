@@ -12,12 +12,80 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const poolId = searchParams.get("id")
 
-    // Single pool detail with keys
+    // Single pool detail with keys — also refresh balances from upstream
     if (poolId) {
       const pool = await queryOne<any>(
         `SELECT * FROM model_pools WHERE id = $1`, [poolId]
       )
-      const keys = await queryMany<any>(
+      let keys = await queryMany<any>(
+        `SELECT c.*, mp.name as pool_name FROM channels c
+         LEFT JOIN model_pools mp ON mp.id = c.model_pool_id
+         WHERE c.model_pool_id = $1
+         ORDER BY c.key_priority ASC, c.created_at DESC`,
+        [poolId]
+      )
+
+      // Refresh balances from upstream providers
+      for (const key of keys) {
+        if (!key.balance_provider || !key.balance_token) continue
+        try {
+          let newBalance = 0
+          if (key.balance_provider === 'deepseek') {
+            const res = await fetch('https://api.deepseek.com/user/balance', {
+              headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${key.balance_token}` },
+              signal: AbortSignal.timeout(5000),
+            })
+            if (res.ok) {
+              const data = await res.json()
+              const info = data?.balance_infos?.[0]
+              if (info) newBalance = Math.round(parseFloat(info.total_balance || '0') * 100)
+            }
+          } else if (key.balance_provider === 'proaiapi') {
+            // proaiapi uses email:password login flow
+            const parts = key.balance_token.split(':')
+            if (parts.length >= 2) {
+              const username = parts[0]
+              const password = parts.slice(1).join(':')
+              const loginRes = await fetch('https://proaiapi.tech/api/user/login?turnstile=', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password }),
+                signal: AbortSignal.timeout(8000),
+              })
+              if (loginRes.ok) {
+                const loginData = await loginRes.json()
+                if (loginData.success && loginData.data?.id) {
+                  const sessionCookie = loginRes.headers.get('set-cookie') || ''
+                  const selfRes = await fetch('https://proaiapi.tech/api/user/self', {
+                    headers: { 'Cookie': sessionCookie, 'New-Api-User': String(loginData.data.id), 'Accept': 'application/json' },
+                    signal: AbortSignal.timeout(8000),
+                  })
+                  if (selfRes.ok) {
+                    const selfData = await selfRes.json()
+                    if (selfData.success && selfData.data) {
+                      newBalance = Math.round((selfData.data.quota || 0) / 5000) // quota / 5000 ≈ cents
+                    }
+                  }
+                }
+              }
+            }
+          }
+          if (newBalance > 0 && newBalance !== key.balance_cents) {
+            const initSet = (key.initial_balance_cents || 0) === 0 ? `, initial_balance_cents = $3` : ''
+            const params: any[] = [newBalance, key.id]
+            if (initSet) params.push(newBalance)
+            await execute(
+              `UPDATE channels SET balance_cents = $1, balance_updated_at = NOW()${initSet} WHERE id = $2`,
+              params
+            )
+          }
+        } catch {
+          // Upstream unavailable — skip refresh
+        }
+      }
+
+      // Re-fetch keys with updated balances
+      keys = await queryMany<any>(
         `SELECT c.*, mp.name as pool_name FROM channels c
          LEFT JOIN model_pools mp ON mp.id = c.model_pool_id
          WHERE c.model_pool_id = $1
@@ -27,11 +95,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ pool, keys })
     }
 
-    // List pools with key counts
+    // List pools with key counts + balance aggregates
     const pools = await queryMany<any>(
       `SELECT mp.*,
               COUNT(c.id) FILTER (WHERE c.status = 'active') as active_keys,
-              COUNT(c.id) as total_keys
+              COUNT(c.id) as total_keys,
+              COALESCE(SUM(c.balance_cents), 0) as total_balance,
+              COALESCE(SUM(c.initial_balance_cents), 0) as total_initial_balance
        FROM model_pools mp
        LEFT JOIN channels c ON c.model_pool_id = mp.id
        GROUP BY mp.id

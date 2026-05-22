@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
       password_hash: string; role: string; subscription_tier: string; status: string;
     }>(
       `SELECT id, email, username, nickname, password_hash, role::text, subscription_tier::text, status::text
-       FROM users WHERE (email = $1 OR username = $1)`,
+       FROM users WHERE (email = $1 OR LOWER(username) = $1)`,
       [login.toLowerCase().trim()]
     )
 

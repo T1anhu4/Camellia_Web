@@ -35,11 +35,29 @@ export async function verifyToken(token: string): Promise<JWTPayload | null> {
 }
 
 // Get the current session from cookies (Server Component / API route)
+// Re-checks role against DB to ensure it's always up-to-date
 export async function getSession(): Promise<JWTPayload | null> {
   const cookieStore = await cookies()
   const token = cookieStore.get(TOKEN_COOKIE)?.value
   if (!token) return null
-  return verifyToken(token)
+  const payload = await verifyToken(token)
+  if (!payload) return null
+
+  // Verify role against database (so admin promotion takes effect immediately)
+  try {
+    const { queryOne } = await import("@/lib/db")
+    const user = await queryOne<{ role: string; status: string; subscription_tier: string }>(
+      "SELECT role::text, status::text, subscription_tier::text FROM users WHERE id = $1",
+      [payload.sub]
+    )
+    if (!user || user.status !== "active") return null
+    payload.role = user.role as "user" | "admin"
+    payload.tier = user.subscription_tier
+  } catch {
+    // DB unavailable — fall back to JWT claims
+  }
+
+  return payload
 }
 
 // Set session cookie (in API route response)

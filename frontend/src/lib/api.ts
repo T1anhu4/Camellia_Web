@@ -82,6 +82,8 @@ class ApiClient {
   async updateModelPool(data: Record<string, unknown>) { return this.patch("/api/admin/model-pools", data) }
   async deleteModelPool(id: string) { return this.del(`/api/admin/model-pools?id=${id}`) }
   async updateChannel(data: Record<string, unknown>) { return this.patch("/api/admin/channels", data) }
+  async checkChannelBalance(provider: string, token: string) { return this.post<any>("/api/admin/channels/check-balance", { provider, token }) }
+  async getBalanceProviders() { return this.get<{ name: string; label: string }[]>("/api/admin/channels/check-balance") }
 
   // --- Admin: Pricing ---
   async getPricing() { return this.get<any[]>("/api/admin/pricing") }

@@ -102,7 +102,11 @@ func ChatCompletions(deps *HandlerDeps) fiber.Handler {
 		if price != nil {
 			estCost := deps.Pricing.CalculateCost(model, promptTokens, 0, tier)
 			if tier == "free" {
-				if err := deps.Quota.CheckBalance(c.Context(), userID, estCost); err != nil {
+				costCents := estCost / 1_000_000
+				if costCents < 1 {
+					costCents = 1
+				}
+				if err := deps.Quota.CheckBalance(c.Context(), userID, costCents); err != nil {
 					return c.Status(402).JSON(openAIError(
 						fmt.Sprintf("Insufficient balance: %v", err), "insufficient_funds"))
 				}

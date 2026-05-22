@@ -140,10 +140,7 @@ func (pe *PricingEngine) CalculateCost(model string, promptTokens, completionTok
 		total *= price.VIPDiscount
 	}
 
-	costCents := int64(total)
-	if costCents < 1 {
-		costCents = 1
-	}
+	costCents := int64(total * 1_000_000) // convert cents to 10^-8 yuan
 	return costCents
 }
 

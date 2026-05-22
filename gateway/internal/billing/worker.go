@@ -209,7 +209,7 @@ func (wp *WorkerPool) flushBatch(batch []BillingTask) {
 		// Update user balance
 		_, err := tx.Exec(ctx,
 			`UPDATE users
-			 SET balance_cents = balance_cents - $1,
+			 SET balance_cents = balance_cents - $1 / 1000000,
 			     daily_token_used = daily_token_used + $2,
 			     updated_at = NOW()
 			 WHERE id = $3`,

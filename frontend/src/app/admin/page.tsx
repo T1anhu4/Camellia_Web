@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { BarChart3, CreditCard, Database, Layers, Network, Plus, Search, Settings, Trash2, Users, X, RefreshCw, Loader2, ChevronLeft, ChevronRight } from "lucide-react"
 import { toast } from "sonner"
 import { cn, formatTokens, formatCents, formatDate } from "@/lib/utils"
@@ -193,10 +193,16 @@ function ChannelsTab() {
   const [showNewPool, setShowNewPool] = useState(false)
   const [showAddKey, setShowAddKey] = useState(false)
   const [newPool, setNewPool] = useState({ name: "", display_name: "", input_price: 2, output_price: 8, pricing_mode: "per_token" as "per_token"|"per_call", per_call_price: 1 })
-  const [newKey, setNewKey] = useState({ api_key: "", base_url: "", key_priority: 3, key_name: "", notes: "", max_concurrency: 10 })
+  const [newKey, setNewKey] = useState({ api_key: "", base_url: "", key_priority: 3, key_name: "", notes: "", max_concurrency: 10, provider: "deepseek" as string, balance_token: "" })
   const [editingKey, setEditingKey] = useState<any>(null)
   const [editingPool, setEditingPool] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [deletePoolId, setDeletePoolId] = useState<string | null>(null)
+  const [showBatchImport, setShowBatchImport] = useState(false)
+  const [batchProvider, setBatchProvider] = useState("deepseek")
+  const [batchBaseUrl, setBatchBaseUrl] = useState("https://api.deepseek.com")
+  const [batchRows, setBatchRows] = useState("")
+  const [batchImporting, setBatchImporting] = useState(false)
 
   const loadPools = useCallback(async () => { setLoading(true); try { setPools(await api.getModelPools()) } catch {} finally { setLoading(false) } }, [])
   useEffect(() => { loadPools() }, [loadPools])
@@ -214,9 +220,26 @@ function ChannelsTab() {
   const handleAddKey = async (e: React.FormEvent) => {
     e.preventDefault(); setSubmitting(true)
     try {
-      await api.createChannel({ name: newKey.key_name || selectedPool.name, provider: "custom", api_key: newKey.api_key, base_url: newKey.base_url, models: [selectedPool.name], weight: 1, priority: 0, max_concurrency: newKey.max_concurrency, model_pool_id: selectedPool.id, key_priority: newKey.key_priority, notes: newKey.notes })
-      toast.success("Key 已添加"); setShowAddKey(false); setNewKey({ api_key: "", base_url: "", key_priority: 3, key_name: "", notes: "", max_concurrency: 10 }); loadPoolDetail(selectedPool.id)
+      await api.createChannel({ name: selectedPool.name, provider: newKey.provider || "custom", api_key: newKey.api_key, base_url: newKey.base_url, models: [selectedPool.name], weight: 1, priority: 0, max_concurrency: newKey.max_concurrency, model_pool_id: selectedPool.id, key_priority: newKey.key_priority, notes: newKey.notes, key_name: selectedPool.name, balance_provider: newKey.provider, initial_balance_cents: 0, balance_cents: 0, balance_token: newKey.balance_token })
+      toast.success("Key 已添加")
+      // Auto-fetch balance if token provided
+      if (newKey.balance_token) {
+        try {
+          const balance = await api.checkChannelBalance(newKey.provider, newKey.balance_token)
+          if (balance?.balance_cents > 0) {
+            await api.updateChannel({ id: (await api.getModelPool(selectedPool.id)).keys[0]?.id, balance_cents: balance.balance_cents, initial_balance_cents: balance.balance_cents })
+          }
+        } catch {}
+      }
+      setShowAddKey(false)
+      setNewKey({ api_key: "", base_url: "", key_priority: 3, key_name: "", notes: "", max_concurrency: 10, provider: "deepseek", balance_token: "" })
+      loadPoolDetail(selectedPool.id)
     } catch (err: any) { toast.error(err.message) } finally { setSubmitting(false) }
+  }
+
+  const handleDeletePool = async (id: string) => {
+    try { await api.deleteModelPool(id); toast.success("模型池已删除"); setDeletePoolId(null); loadPools() }
+    catch (err: any) { toast.error(err.message) }
   }
 
   const handleDeleteKey = async (id: string) => { if (!confirm("删除此 Key？")) return; try { await api.deleteChannel(id); toast.success("已删除"); loadPoolDetail(selectedPool.id) } catch (err: any) { toast.error(err.message) } }
@@ -241,6 +264,22 @@ function ChannelsTab() {
             </div>
           </div>
 
+          {/* Balance bar */}
+          {(() => {
+            const totalInit = poolKeys.reduce((s: number, k: any) => s + (k.initial_balance_cents || 0), 0)
+            const totalBal = poolKeys.reduce((s: number, k: any) => s + (k.balance_cents || 0), 0)
+            if (totalInit === 0) return null
+            const pct = totalInit > 0 ? (totalBal / totalInit * 100) : 0
+            return (
+              <div className="mb-4">
+                <div className="flex justify-between text-xs text-surface-500 mb-1"><span>余额汇总</span><span>¥{(totalBal / 100).toFixed(2)} / ¥{(totalInit / 100).toFixed(2)}</span></div>
+                <div className="h-2 bg-surface-200 rounded-full overflow-hidden">
+                  <div className={cn("h-full rounded-full transition-all", pct > 50 ? "bg-emerald-500" : pct > 20 ? "bg-amber-500" : "bg-red-500")} style={{ width: `${Math.min(pct, 100)}%` }} />
+                </div>
+              </div>
+            )
+          })()}
+
           {/* Priority legend */}
           <div className="flex gap-2 mb-4 text-xs">
             {[0,1,2,3,4,5].map(p => (
@@ -258,7 +297,14 @@ function ChannelsTab() {
           <form onSubmit={handleAddKey} className="card bg-white p-5 space-y-3">
             <h4 className="font-bold text-sm">添加 API Key 到 {selectedPool.name}</h4>
             <div className="grid sm:grid-cols-2 gap-3">
-              <div><label className="text-xs text-surface-600 mb-0.5 block">Key 名称</label><input value={newKey.key_name} onChange={e => setNewKey({ ...newKey, key_name: e.target.value })} placeholder="可选标识" className="input-field" /></div>
+              <div><label className="text-xs text-surface-600 mb-0.5 block">Key 渠道</label>
+                <select value={newKey.provider} onChange={e => { const p = e.target.value; const baseUrls: Record<string,string> = { deepseek: 'https://api.deepseek.com', proaiapi: 'https://proaiapi.tech', custom: '' }; setNewKey({ ...newKey, provider: p, base_url: baseUrls[p] || '' }) }} className="input-field">
+                  <option value="deepseek">DeepSeek 官方</option>
+                  <option value="proaiapi">proaiapi</option>
+                  <option value="custom">自定义</option>
+                </select>
+              </div>
+              <div><label className="text-xs text-surface-600 mb-0.5 block">用户 Token（查余额用）</label><input value={newKey.balance_token} onChange={e => setNewKey({ ...newKey, balance_token: e.target.value })} placeholder={newKey.provider === 'proaiapi' ? '邮箱:密码' : 'sk-...'} className="input-field" /></div>
               <div><label className="text-xs text-surface-600 mb-0.5 block">优先级 (0最高-5最低)</label><select value={newKey.key_priority} onChange={e => setNewKey({ ...newKey, key_priority: +e.target.value })} className="input-field"><option value={0}>P0 — 最高</option><option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3 — 默认</option><option value={4}>P4</option><option value={5}>P5 — 最低</option></select></div>
               <div className="sm:col-span-2"><label className="text-xs text-surface-600 mb-0.5 block">API Key *</label><input value={newKey.api_key} onChange={e => setNewKey({ ...newKey, api_key: e.target.value })} placeholder="sk-..." className="input-field" required /></div>
               <div className="sm:col-span-2"><label className="text-xs text-surface-600 mb-0.5 block">Base URL *</label><input value={newKey.base_url} onChange={e => setNewKey({ ...newKey, base_url: e.target.value })} placeholder="https://api.xxx.com" className="input-field" required /></div>
@@ -277,6 +323,7 @@ function ChannelsTab() {
                 <th className="text-left py-3 px-3 text-xs font-medium text-surface-500">API Key</th>
                 <th className="text-left py-3 px-3 text-xs font-medium text-surface-500">优先级</th>
                 <th className="text-left py-3 px-3 text-xs font-medium text-surface-500">状态</th>
+                <th className="text-left py-3 px-3 text-xs font-medium text-surface-500">余额</th>
                 <th className="text-left py-3 px-3 text-xs font-medium text-surface-500">备注</th>
                 <th className="text-right py-3 px-3 text-xs font-medium text-surface-500">操作</th>
               </tr></thead>
@@ -287,7 +334,17 @@ function ChannelsTab() {
                     <td className="py-2.5 px-3 font-mono text-xs text-surface-600 max-w-[180px] truncate" title={k.api_key_enc ? "(加密存储)" : ""}>{k.key_prefix || "***"}</td>
                     <td className="py-2.5 px-3"><span className={cn("px-1.5 py-0.5 rounded text-xs font-bold", k.key_priority <= 1 ? "bg-red-100 text-red-700" : k.key_priority <= 3 ? "bg-amber-100 text-amber-700" : "bg-surface-100 text-surface-600")}>P{k.key_priority}</span></td>
                     <td className="py-2.5 px-3"><Badge variant={k.status === "active" ? "success" : "danger"}>{k.status}</Badge></td>
-                    <td className="py-2.5 px-3 text-xs text-surface-500 max-w-[120px] truncate">{k.notes || "-"}</td>
+                    <td className="py-2.5 px-3">
+                      {k.initial_balance_cents > 0 ? (
+                        <div>
+                          <div className="flex justify-between text-[10px] text-surface-500 mb-0.5"><span>¥{(k.balance_cents / 100).toFixed(2)}</span><span>¥{(k.initial_balance_cents / 100).toFixed(2)}</span></div>
+                          <div className="h-1.5 bg-surface-200 rounded-full overflow-hidden w-20">
+                            <div className={cn("h-full rounded-full", (k.balance_cents / k.initial_balance_cents) > 0.5 ? "bg-emerald-500" : (k.balance_cents / k.initial_balance_cents) > 0.2 ? "bg-amber-500" : "bg-red-500")} style={{ width: `${Math.min(k.balance_cents / k.initial_balance_cents * 100, 100)}%` }} />
+                          </div>
+                        </div>
+                      ) : <span className="text-xs text-surface-400">-</span>}
+                    </td>
+                    <td className="py-2.5 px-3 text-xs text-surface-500 max-w-[100px] truncate">{k.notes || "-"}</td>
                     <td className="py-2.5 px-3 text-right flex gap-1 justify-end">
                       <button onClick={() => setEditingKey(editingKey?.id === k.id ? null : k)} className="p-1 rounded hover:bg-surface-100" title="编辑"><Settings className="w-3.5 h-3.5 text-surface-500" /></button>
                       <button onClick={() => handleDeleteKey(k.id)} className="p-1 rounded hover:bg-red-50"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>
@@ -324,7 +381,10 @@ function ChannelsTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <button onClick={loadPools} className="btn-secondary text-sm" disabled={loading}><RefreshCw className={cn("w-4 h-4 mr-1.5", loading && "animate-spin")} />{t("common.refresh")}</button>
-        <button onClick={() => setShowNewPool(!showNewPool)} className="btn-primary"><Plus className="w-4 h-4 mr-1.5" />新建模型池</button>
+        <div className="flex gap-2">
+          <button onClick={() => { setShowNewPool(false); setShowBatchImport(!showBatchImport) }} className="btn-secondary text-sm"><Plus className="w-4 h-4 mr-1.5" />批量导入</button>
+          <button onClick={() => { setShowBatchImport(false); setShowNewPool(!showNewPool) }} className="btn-primary"><Plus className="w-4 h-4 mr-1.5" />新建模型池</button>
+        </div>
       </div>
 
       {showNewPool && (
@@ -350,31 +410,163 @@ function ChannelsTab() {
         </form>
       )}
 
+      {showBatchImport && (
+        <div className="card bg-white p-5 space-y-4">
+          <div className="flex items-center justify-between"><h3 className="font-bold">批量导入 Key</h3><button onClick={() => setShowBatchImport(false)}><X className="w-4 h-4" /></button></div>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <div><label className="text-xs text-surface-600 mb-1 block">供应商</label>
+              <select value={batchProvider} onChange={e => { const p=e.target.value; const baseUrls:Record<string,string>={deepseek:'https://api.deepseek.com',proaiapi:'https://proaiapi.tech',custom:''}; setBatchProvider(p); setBatchBaseUrl(baseUrls[p]||'') }} className="input-field">
+                <option value="deepseek">DeepSeek 官方</option><option value="proaiapi">proaiapi</option><option value="custom">自定义</option>
+              </select>
+            </div>
+            <div className="sm:col-span-2"><label className="text-xs text-surface-600 mb-1 block">Base URL</label><input value={batchBaseUrl} onChange={e => setBatchBaseUrl(e.target.value)} className="input-field" placeholder="https://api.xxx.com" /></div>
+          </div>
+          <div><label className="text-xs text-surface-600 mb-1 block">每行一条: 用户Token | API Key | 模型(逗号分隔)</label>
+            <textarea value={batchRows} onChange={e => setBatchRows(e.target.value)}
+              placeholder={"sk-xxx|sk-xxx|gpt-4o,claude-4-haiku\nemail:pass|sk-yyy|gpt-4o-mini,gemini-3.5-flash"}
+              className="input-field w-full h-40 font-mono text-xs" />
+          </div>
+          <p className="text-xs text-surface-500">
+            格式: 用户Token | API Key | 模型列表（逗号分隔）。<br/>
+            自动创建缺失的模型池，并将 Key 分配到对应池中。DeepSeek Token=API Key，proaiapi Token=邮箱:密码。
+          </p>
+          <button onClick={async () => {
+            setBatchImporting(true)
+            const lines = batchRows.split('\n').filter(l => l.trim())
+            let created = 0
+            for (const line of lines) {
+              const parts = line.split('|').map(s => s.trim())
+              if (parts.length < 3) continue
+              const [token, apiKey, modelsStr] = parts
+              const models = modelsStr.split(',').map(m => m.trim()).filter(Boolean)
+              for (const model of models) {
+                try {
+                  // Find or create model pool
+                  let poolId = ''
+                  const existing = pools.find((p: any) => p.name === model)
+                  if (existing) { poolId = existing.id }
+                  else {
+                    const res = await api.createModelPool({ name: model, display_name: model, input_price_cents: Math.round(newPool.input_price*100), output_price_cents: Math.round(newPool.output_price*100), pricing_mode: 'per_token' })
+                    poolId = (res as any).id
+                    await loadPools()
+                  }
+                  if (poolId) {
+                    await api.createChannel({
+                      name: model, provider: batchProvider, api_key: apiKey, base_url: batchBaseUrl,
+                      models: [model], model_pool_id: poolId, key_priority: 3, key_name: model,
+                      balance_provider: batchProvider, balance_token: token,
+                      initial_balance_cents: 0, balance_cents: 0, weight: 1, priority: 0, max_concurrency: 10,
+                    })
+                    created++
+                  }
+                } catch {}
+              }
+            }
+            setBatchImporting(false)
+            if (created > 0) { toast.success(`成功导入 ${created} 条 Key`); setBatchRows(''); loadPools() }
+            else { toast.error('没有有效的导入数据') }
+          }} disabled={batchImporting} className="btn-primary">{batchImporting ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}开始导入</button>
+        </div>
+      )}
+
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {loading ? Array.from({ length: 3 }).map((_, i) => <div key={i} className="card bg-white p-5"><Skeleton className="h-5 w-32 mb-3" /><Skeleton className="h-3 w-24 mb-2" /><Skeleton className="h-2 w-full" /></div>) : pools.length === 0 ? (
           <div className="col-span-full card bg-white p-12 text-center text-surface-500">暂无模型池，点击"新建模型池"创建</div>
         ) : pools.map(pool => (
-          <div key={pool.id} onClick={() => loadPoolDetail(pool.id)} className="card bg-white p-5 cursor-pointer hover:ring-2 hover:ring-surface-950 transition-all">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-bold text-lg">{pool.display_name || pool.name}</h3>
-              <ChevronRight className="w-4 h-4 text-surface-400" />
+          <div key={pool.id} className="card bg-white p-5 hover:ring-2 hover:ring-surface-950 transition-all relative group">
+            <div onClick={() => loadPoolDetail(pool.id)} className="cursor-pointer">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-lg">{pool.display_name || pool.name}</h3>
+                <ChevronRight className="w-4 h-4 text-surface-400" />
+              </div>
+              <p className="text-xs text-surface-500 font-mono mb-3">{pool.name}</p>
+              <div className="flex justify-between text-xs text-surface-500 mb-2">
+                <span>Key 活跃度</span>
+                <span>{pool.active_keys || 0}/{pool.total_keys || 0}</span>
+              </div>
+              <div className="h-2 bg-surface-200 rounded-full overflow-hidden">
+                <div className="h-full bg-surface-950 rounded-full transition-all" style={{ width: `${pool.total_keys > 0 ? ((pool.active_keys || 0) / pool.total_keys * 100) : 0}%` }} />
+              </div>
+              <div className="mt-3 text-xs text-surface-500">
+                输入 ¥{(pool.input_price_cents / 100).toFixed(2)} / 输出 ¥{(pool.output_price_cents / 100).toFixed(2)} / 1M tokens
+              </div>
+              {pool.total_initial_balance > 0 && (
+                <div className="mt-2">
+                  <div className="flex justify-between text-[10px] text-surface-500 mb-0.5"><span>余额</span><span>¥{(pool.total_balance / 100).toFixed(2)} / ¥{(pool.total_initial_balance / 100).toFixed(2)}</span></div>
+                  <div className="h-1.5 bg-surface-200 rounded-full overflow-hidden">
+                    <div className={cn("h-full rounded-full", (pool.total_balance / pool.total_initial_balance) > 0.5 ? "bg-emerald-500" : (pool.total_balance / pool.total_initial_balance) > 0.2 ? "bg-amber-500" : "bg-red-500")} style={{ width: `${Math.min(pool.total_balance / pool.total_initial_balance * 100, 100)}%` }} />
+                  </div>
+                </div>
+              )}
             </div>
-            <p className="text-xs text-surface-500 font-mono mb-3">{pool.name}</p>
-            <div className="flex justify-between text-xs text-surface-500 mb-2">
-              <span>Key 活跃度</span>
-              <span>{pool.active_keys || 0}/{pool.total_keys || 0}</span>
-            </div>
-            <div className="h-2 bg-surface-200 rounded-full overflow-hidden">
-              <div className="h-full bg-surface-950 rounded-full transition-all" style={{ width: `${pool.total_keys > 0 ? ((pool.active_keys || 0) / pool.total_keys * 100) : 0}%` }} />
-            </div>
-            <div className="mt-3 text-xs text-surface-500">
-              输入 ¥{(pool.input_price_cents / 100).toFixed(2)} / 输出 ¥{(pool.output_price_cents / 100).toFixed(2)} / 1M tokens
-            </div>
+            <button onClick={(e) => { e.stopPropagation(); setDeletePoolId(pool.id) }}
+              className="absolute bottom-3 right-3 p-1.5 rounded-lg hover:bg-red-50 text-surface-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+              title="删除模型池">
+              <Trash2 className="w-4 h-4" />
+            </button>
           </div>
         ))}
       </div>
+
+      {/* Delete Pool Confirmation */}
+      {deletePoolId && (
+        <div className="fixed inset-0 z-50 bg-surface-950/30 flex items-center justify-center" onClick={() => setDeletePoolId(null)}>
+          <div className="bg-white border border-surface-200 rounded-[20px] p-6 max-w-sm mx-4 shadow-xl" onClick={e => e.stopPropagation()}>
+            <p className="text-sm font-medium mb-1">确定要删除该模型池？</p>
+            <p className="text-xs text-surface-500 mb-4">删除后池内所有 Key 将失去关联，此操作不可撤销。</p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setDeletePoolId(null)} className="btn-secondary px-4 py-2 text-sm">取消</button>
+              <button onClick={() => handleDeletePool(deletePoolId)} className="px-4 py-2 text-sm rounded-xl bg-red-600 hover:bg-red-500 text-white font-medium transition-colors">确定删除</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-refresh balance every 60s when in pool detail */}
+      {selectedPool && <BalanceRefresher poolKeys={poolKeys} loadPoolDetail={loadPoolDetail} selectedPool={selectedPool} />}
     </div>
   )
+}
+
+function BalanceRefresher({ poolKeys, loadPoolDetail, selectedPool }: { poolKeys: any[]; loadPoolDetail: (id: string) => void; selectedPool: any }) {
+  const keysRef = useRef(poolKeys)
+  keysRef.current = poolKeys
+
+  useEffect(() => {
+    const refresh = async () => {
+      const keys = keysRef.current
+      let changed = false
+      for (const key of keys) {
+        if (!key.balance_provider || !key.balance_token) continue
+        try {
+          const res = await fetch("/api/admin/channels/check-balance", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ provider: key.balance_provider, token: key.balance_token }),
+          })
+          if (res.ok) {
+            const data = await res.json()
+            if (Math.abs(data.balance_cents - (key.balance_cents || 0)) > 0) {
+              await fetch("/api/admin/channels", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
+                body: JSON.stringify({ id: key.id, balance_cents: data.balance_cents }),
+              })
+              changed = true
+            }
+          }
+        } catch {}
+      }
+      if (changed) loadPoolDetail(selectedPool.id)
+    }
+    // Run immediately on mount
+    refresh()
+    const interval = setInterval(refresh, 60000)
+    return () => clearInterval(interval)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  return null
 }
 
 function PricingTab() {

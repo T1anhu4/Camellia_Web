@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { name, provider, api_key, base_url, models, weight, priority, max_concurrency, model_pool_id, key_priority, key_name } = body
+    const { name, provider, api_key, base_url, models, weight, priority, max_concurrency, model_pool_id, key_priority, key_name, balance_provider, balance_cents, initial_balance_cents, balance_token } = body
 
     if (!name || !api_key || !base_url) {
       return NextResponse.json({ error: "name, api_key, and base_url are required" }, { status: 400 })
@@ -71,8 +71,8 @@ export async function POST(req: NextRequest) {
     }
 
     const ch = await queryOne<{ id: string }>(
-      `INSERT INTO channels (name, provider, api_key_enc, base_url, models, weight, priority, max_concurrency, model_pool_id, key_priority, key_name)
-       VALUES ($1, $2::provider_type, $3, $4, $5::text[], $6, $7, $8, $9, $10, $11)
+      `INSERT INTO channels (name, provider, api_key_enc, base_url, models, weight, priority, max_concurrency, model_pool_id, key_priority, key_name, balance_provider, balance_cents, initial_balance_cents, balance_token)
+       VALUES ($1, $2::provider_type, $3, $4, $5::text[], $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING id`,
       [
         key_name || name || "Imported",
@@ -86,13 +86,71 @@ export async function POST(req: NextRequest) {
         model_pool_id || null,
         key_priority ?? 3,
         key_name || null,
+        balance_provider || "",
+        balance_cents || 0,
+        initial_balance_cents || 0,
+        balance_token || "",
       ]
     )
 
-    return NextResponse.json({ id: ch?.id })
+    const newId = ch?.id
+    if (newId && balance_token) {
+      fetchInitialBalance(newId, balance_provider || "", balance_token)
+        .catch(e => console.error("initial balance fetch failed:", e))
+    }
+
+    return NextResponse.json({ id: newId })
   } catch (err) {
     console.error("admin channel create error:", err)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  }
+}
+
+async function fetchInitialBalance(channelId: string, provider: string, token: string) {
+  let newBalance = 0
+  try {
+    if (provider === 'deepseek') {
+      const res = await fetch('https://api.deepseek.com/user/balance', {
+        headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${token}` },
+        signal: AbortSignal.timeout(5000),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        const info = data?.balance_infos?.[0]
+        if (info) newBalance = Math.round(parseFloat(info.total_balance || '0') * 100)
+      }
+    } else if (provider === 'proaiapi') {
+      const parts = token.split(':')
+      if (parts.length >= 2) {
+        const loginRes = await fetch('https://proaiapi.tech/api/user/login?turnstile=', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: parts[0], password: parts.slice(1).join(':') }),
+          signal: AbortSignal.timeout(8000),
+        })
+        if (loginRes.ok) {
+          const loginData = await loginRes.json()
+          if (loginData.success && loginData.data?.id) {
+            const sessionCookie = loginRes.headers.get('set-cookie') || ''
+            const selfRes = await fetch('https://proaiapi.tech/api/user/self', {
+              headers: { 'Cookie': sessionCookie, 'New-Api-User': String(loginData.data.id) },
+              signal: AbortSignal.timeout(8000),
+            })
+            if (selfRes.ok) {
+              const selfData = await selfRes.json()
+              if (selfData.success && selfData.data) {
+                newBalance = Math.round((selfData.data.quota || 0) / 5000)
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch {}
+  if (newBalance > 0) {
+    await execute(
+      `UPDATE channels SET balance_cents = $1, initial_balance_cents = $1, balance_updated_at = NOW() WHERE id = $2`,
+      [newBalance, channelId]
+    )
   }
 }
 
@@ -101,7 +159,7 @@ export async function PATCH(req: NextRequest) {
     const session = await getSession()
     if (!session || session.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     const body = await req.json()
-    const { id, api_key, base_url, key_priority, key_name, notes, max_concurrency } = body
+    const { id, api_key, base_url, key_priority, key_name, notes, max_concurrency, balance_cents, initial_balance_cents, balance_provider, balance_updated_at } = body
     if (!id) return NextResponse.json({ error: "id required" }, { status: 400 })
 
     const sets: string[] = []; const params: any[] = [id]; let idx = 2
@@ -111,6 +169,9 @@ export async function PATCH(req: NextRequest) {
     if (key_name !== undefined) { sets.push(`key_name = $${idx++}`); params.push(key_name) }
     if (notes !== undefined) { sets.push(`notes = $${idx++}`); params.push(notes) }
     if (max_concurrency !== undefined) { sets.push(`max_concurrency = $${idx++}`); params.push(max_concurrency) }
+    if (balance_cents !== undefined) { sets.push(`balance_cents = $${idx++}`); params.push(balance_cents); sets.push(`balance_updated_at = NOW()`) }
+    if (initial_balance_cents !== undefined) { sets.push(`initial_balance_cents = $${idx++}`); params.push(initial_balance_cents) }
+    if (balance_provider !== undefined) { sets.push(`balance_provider = $${idx++}`); params.push(balance_provider) }
     if (sets.length === 0) return NextResponse.json({ error: "no fields" }, { status: 400 })
     sets.push("updated_at = NOW()")
 
