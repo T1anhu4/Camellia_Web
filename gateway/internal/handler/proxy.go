@@ -220,8 +220,13 @@ func executeWithRetry(c *fiber.Ctx, deps *HandlerDeps,
 
 		baseURL := strings.TrimRight(channel.BaseURL, "/")
 		targetURL := baseURL + "/v1/chat/completions"
+		isGemini := channel.Provider == "gemini"
+		reqBodyToSend := bodyBytes
+		if isGemini {
+			reqBodyToSend, targetURL, _ = prepareGeminiRequest(baseURL, channel.APIKey, model, bodyBytes, stream)
+		}
 
-		req, err := http.NewRequestWithContext(c.Context(), "POST", targetURL, bytes.NewReader(bodyBytes))
+		req, err := http.NewRequestWithContext(c.Context(), "POST", targetURL, bytes.NewReader(reqBodyToSend))
 		if err != nil {
 			deps.Pool.ReleaseChannel(c.Context(), channel)
 			lastErr = err
@@ -236,7 +241,12 @@ func executeWithRetry(c *fiber.Ctx, deps *HandlerDeps,
 		}
 		req.Header.Set("X-Request-ID", requestID)
 
-		resp, err := channel.HTTPClient.Do(req)
+		var resp *http.Response
+		if isGemini {
+			resp = doGeminiRequest(targetURL, reqBodyToSend, model)
+		} else {
+			resp, err = channel.HTTPClient.Do(req)
+		}
 		if err != nil {
 			deps.Pool.RecordError(c.Context(), channel, 500)
 			deps.Pool.ReleaseChannel(c.Context(), channel)

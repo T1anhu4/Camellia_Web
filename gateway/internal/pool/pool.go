@@ -134,6 +134,7 @@ func (cp *ChannelPool) LoadFromDB(ctx context.Context) error {
 			ch.APIKey = apiKeyEnc
 		}
 		ch.Models = models
+			if ch.Provider == "gemini" { ch.HTTPClient = &http.Client{Timeout: 5 * time.Minute, Transport: &http.Transport{TLSHandshakeTimeout: 10 * time.Second, DisableKeepAlives: false}} }
 		cp.byID[ch.ID] = ch
 		for _, m := range models {
 			cp.byModel[m] = append(cp.byModel[m], ch)

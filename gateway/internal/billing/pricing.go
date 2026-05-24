@@ -120,9 +120,27 @@ func (pe *PricingEngine) GetPrice(ctx context.Context, model string) *ModelPrice
 	return nil
 }
 
-// CalculateCost computes the cost in cents for a given token usage.
-// Uses input/output pricing split for accurate per-token-type charging.
+// CalculateCost computes the cost in 10^-8 yuan units for a given token usage.
 func (pe *PricingEngine) CalculateCost(model string, promptTokens, completionTokens int, tier string) int64 {
+	// 1. Try model_pools first (RMB cents per 1M tokens)
+	if pe.pg != nil {
+		var poolIn, poolOut, perCallCents int
+		var poolMode string
+		err := pe.pg.QueryRow(context.Background(),
+			"SELECT input_price_cents, output_price_cents, per_call_price_cents, pricing_mode FROM model_pools WHERE name = $1 AND is_active = true LIMIT 1",
+			model,
+		).Scan(&poolIn, &poolOut, &perCallCents, &poolMode)
+		if err == nil {
+			if poolMode == "per_call" && perCallCents > 0 {
+				return int64(perCallCents) * 1_000_000
+			}
+			if poolIn > 0 || poolOut > 0 {
+				return int64(promptTokens)*int64(poolIn) + int64(completionTokens)*int64(poolOut)
+			}
+		}
+	}
+
+	// 2. Fallback to model_pricing (USD per 1K tokens)
 	price := pe.GetPrice(context.Background(), model)
 	if price == nil {
 		return 0
@@ -132,7 +150,6 @@ func (pe *PricingEngine) CalculateCost(model string, promptTokens, completionTok
 	outputCost := float64(completionTokens) / 1000.0 * price.SellOutputPrice * 100
 	total := inputCost + outputCost
 
-	// Apply tier discount
 	switch tier {
 	case "enterprise":
 		total *= price.EnterpriseDiscount
@@ -140,8 +157,7 @@ func (pe *PricingEngine) CalculateCost(model string, promptTokens, completionTok
 		total *= price.VIPDiscount
 	}
 
-	costCents := int64(total * 1_000_000) // convert cents to 10^-8 yuan
-	return costCents
+	return int64(total * 1_000_000)
 }
 
 // StartRefreshLoop periodically reloads the pricing cache.

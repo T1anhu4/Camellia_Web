@@ -2,7 +2,7 @@
 
 ## 完整架构文档 · Claude Code 接手即用
 
-> 版本: v3.2 | 更新: 2026-05-22 | 作者: T1anhu4
+> 版本: v3.3 | 更新: 2026-05-25 | 作者: T1anhu4
 > GitHub: https://github.com/T1anhu4/Camellia_Web
 
 ---
@@ -409,4 +409,97 @@ python3 register_batch.py
 
 ---
 
-> 文档版本: v3.2 | 更新: 2026-05-22 | 作者: T1anhu4 | 定价: ¥
+## 附录 B: v3.3 开发日志 (2026-05-23 ~ 2026-05-25)
+
+### 2026-05-23 — Google Gemini 渠道全链路打通
+
+**背景**：用户获得 Google Cloud $383 赠金和 Gemini API Key，需要平台支持 Google AI Studio 渠道。
+
+**17:00 — 协议转换层 (gemini_handler.go)**
+- 新建 `gateway/internal/handler/gemini_handler.go`
+- 实现 `prepareGeminiRequest()`：OpenAI → Gemini 原生格式转换
+  - messages[] → contents[{role, parts[{text}]}]
+  - max_tokens → generationConfig.maxOutputTokens (最低 500)
+  - stream → `:streamGenerateContent` vs `:generateContent` 端点
+- 实现 `doGeminiRequest()`：通过系统 curl 调用 Google API
+  - 绕过 Go TLS 指纹识别（Go HTTP Client 被 Google 返回 401）
+  - 关键修复：`-d @-` 标志从 stdin 读取 POST body
+  - Gemini 响应 → OpenAI 格式转换（candidates→choices, usageMetadata→usage）
+  - 模型名从请求动态透传，不再硬编码
+- URL 格式：`https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}`
+
+**19:00 — 影子计费算法**
+- `gateway/internal/billing/record.go` 重构
+  - `RecordUsageWithShadow()` 新增 cachedTokens 和 channelProvider 参数
+  - Gemini 渠道自动执行双向扣费：用户端按模型池定价 + 渠道端按 Google 官方定价
+  - `calculateGeminiShadowCost()` 精算公式：
+    - 标准输入：$1.50/1M tokens × 7.2 汇率 → ¥/1K
+    - 缓存命中输入：标准输入价的 10%（1折）
+    - 输出：$9.00/1M tokens × 7.2 汇率
+    - 公式：(regular_input × $1.50 + cached_input × $0.15 + output × $9.00) / 1M × 7.2 × 100 → RMB 分
+  - `FOR UPDATE` 行级锁防止高并发脏写
+- `gateway/internal/billing/worker.go`
+  - BillingTask 增加 CachedTokens 和 ChannelProvider 字段
+  - drainBuffer 批量事务增加影子扣费逻辑
+
+**21:00 — 健康探测适配**
+- `gateway/internal/pool/pool.go` → `activeProbe()`
+  - Gemini 渠道使用 POST `:generateContent?key={key}` 代替 GET `/v1/models`
+  - 发送最小化请求体 `{"contents":[{"parts":[{"text":"ping"}]}]}`
+  - Gemini 返回 401/403 触发熔断，其余状态码视为正常
+
+**22:00 — 协议双向转换完善**
+- `gateway/internal/tokenizer/gemini.go`
+  - Gemini SSE 流式 → OpenAI SSE 格式重组（candidates→choices）
+  - `ConvertOpenAIToGemini()`: role 映射（assistant→model, system→user）
+  - `ConvertGeminiSSEToOpenAI()`: 流式 chunk 逐行转换
+  - `ParseGeminiCachedTokens()`: 从 usageMetadata 提取 cachedContentTokenCount
+
+**23:00 — 前端渠道管理增强**
+- Admin 渠道管理添加 Key 时新增 `Google AI Studio` 提供商选项
+- 选 Google AI Studio 自动填入 `https://generativelanguage.googleapis.com`
+- 批量导入同步支持 Google AI Studio
+- 模型名动态透传：模型池叫什么 → 请求 Google 就用什么 → 返回显示什么
+
+### 2026-05-24 — 计费引擎修复
+
+**问题**：134 tokens 的 Gemini 请求扣费显示异常，实际计费为 0。
+
+**根因**：
+1. 计费主路径 (`CalculateCost`) 只查 `model_pricing` 表（USD/1K），Gemini 模型不在该表中 → 返回 0
+2. 回退路径 (`RecordUsageDetailed`) 公式缺少除以 1M 的步骤
+
+**修复**：
+- `gateway/internal/billing/pricing.go` → `CalculateCost()` 优先查 `model_pools`（RMB/1M），再回退 `model_pricing`
+  - 公式：`promptTokens × input_price_cents + completionTokens × output_price_cents` (subunits, 10^-8 yuan)
+  - 实际扣费 = subunits / 1,000,000 (RMB cents)
+- `gateway/internal/billing/record.go` → `balance_after` 改为实际余额（从 UPDATE RETURNING 获取）
+- `gateway/internal/billing/worker.go` → batch UPDATE 改为 QueryRow + RETURNING balance_cents
+
+**CachedContentTokenCount 捕获**
+- Gemini 响应解析结构体新增 `CachedContentTokenCount int \`json:"cachedContentTokenCount"\``
+- OpenAI 格式响应 usage 中透传 `cached_content_token_count`
+
+### 2026-05-25 — 文档与发布
+
+- 更新 ARCHITECTURE.md 至 v3.3
+- 推送代码至 GitHub: https://github.com/T1anhu4/Camellia_Web
+- ACR 镜像同步更新
+
+### v3.3 新增文件清单
+
+| 文件 | 用途 |
+|------|------|
+| `gateway/internal/handler/gemini_handler.go` | Gemini 协议转换 + curl 调用 + 响应转换 |
+| `gateway/internal/tokenizer/gemini.go` | Gemini SSE 流转换 + 缓存 Token 解析 |
+| `gateway/internal/billing/record.go` | 重写：影子计费 + FOR UPDATE + 缓存打折 |
+| `gateway/internal/billing/pricing.go` | model_pools 优先定价 |
+| `gateway/internal/billing/worker.go` | BillingTask 扩展 + batch 影子扣费 |
+| `gateway/internal/pool/pool.go` | Gemini 健康探测适配 |
+| `gateway/internal/handler/proxy.go` | Gemini 路由注入 (isGemini → prepareGeminiRequest → doGeminiRequest) |
+| `frontend/src/app/admin/page.tsx` | Google AI Studio 提供商选项 |
+| `frontend/src/app/api/admin/channels/calibrate-balance/route.ts` | 渠道余额手动校准端点 |
+
+---
+
+> 文档版本: v3.3 | 更新: 2026-05-25 | 作者: T1anhu4 | Gemini 全链路通车

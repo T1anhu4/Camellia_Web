@@ -298,8 +298,9 @@ function ChannelsTab() {
             <h4 className="font-bold text-sm">添加 API Key 到 {selectedPool.name}</h4>
             <div className="grid sm:grid-cols-2 gap-3">
               <div><label className="text-xs text-surface-600 mb-0.5 block">Key 渠道</label>
-                <select value={newKey.provider} onChange={e => { const p = e.target.value; const baseUrls: Record<string,string> = { deepseek: 'https://api.deepseek.com', proaiapi: 'https://proaiapi.tech', custom: '' }; setNewKey({ ...newKey, provider: p, base_url: baseUrls[p] || '' }) }} className="input-field">
+                <select value={newKey.provider} onChange={e => { const p = e.target.value; const baseUrls: Record<string,string> = { deepseek: 'https://api.deepseek.com', proaiapi: 'https://proaiapi.tech', gemini: 'https://generativelanguage.googleapis.com', custom: '' }; setNewKey({ ...newKey, provider: p, base_url: baseUrls[p] || '' }) }} className="input-field">
                   <option value="deepseek">DeepSeek 官方</option>
+                  <option value="gemini">Google AI Studio</option>
                   <option value="proaiapi">proaiapi</option>
                   <option value="custom">自定义</option>
                 </select>
@@ -415,8 +416,8 @@ function ChannelsTab() {
           <div className="flex items-center justify-between"><h3 className="font-bold">批量导入 Key</h3><button onClick={() => setShowBatchImport(false)}><X className="w-4 h-4" /></button></div>
           <div className="grid sm:grid-cols-3 gap-3">
             <div><label className="text-xs text-surface-600 mb-1 block">供应商</label>
-              <select value={batchProvider} onChange={e => { const p=e.target.value; const baseUrls:Record<string,string>={deepseek:'https://api.deepseek.com',proaiapi:'https://proaiapi.tech',custom:''}; setBatchProvider(p); setBatchBaseUrl(baseUrls[p]||'') }} className="input-field">
-                <option value="deepseek">DeepSeek 官方</option><option value="proaiapi">proaiapi</option><option value="custom">自定义</option>
+              <select value={batchProvider} onChange={e => { const p=e.target.value; const baseUrls:Record<string,string>={deepseek:'https://api.deepseek.com',proaiapi:'https://proaiapi.tech',gemini:'https://generativelanguage.googleapis.com',custom:''}; setBatchProvider(p); setBatchBaseUrl(baseUrls[p]||'') }} className="input-field">
+                <option value="deepseek">DeepSeek 官方</option><option value="gemini">Google AI Studio</option><option value="proaiapi">proaiapi</option><option value="custom">自定义</option>
               </select>
             </div>
             <div className="sm:col-span-2"><label className="text-xs text-surface-600 mb-1 block">Base URL</label><input value={batchBaseUrl} onChange={e => setBatchBaseUrl(e.target.value)} className="input-field" placeholder="https://api.xxx.com" /></div>
